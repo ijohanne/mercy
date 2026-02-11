@@ -1,8 +1,12 @@
-/target
-plans/
-issues/
+backend/target/
+target/
+frontend/.next/
+frontend/node_modules/
+frontend/next-env.d.ts
 .env
 .DS_Store
 .direnv/
 debug_*.png
 screenshot.png
+plans/
+issues/

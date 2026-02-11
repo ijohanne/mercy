@@ -1,42 +1,32 @@
 # Mercy
 
-Mercenary Exchange Locator Service -- a Rust server that automates finding special tiles in the Total Battle browser game using headless Chromium and template matching. Results are exposed via a REST API.
+Mercenary Exchange Locator Service -- a Rust backend that automates finding special tiles in the Total Battle browser game using headless Chromium and template matching, with a Next.js admin interface for browser-based control.
 
-## Building
-
-### Nix (recommended)
+## Quick Start
 
 ```sh
-nix build
+cp .env.example .env
+# Edit .env with your credentials
+just dev
 ```
 
-The output includes the binary at `result/bin/mercy` and reference images at `result/share/mercy/assets/`.
+This starts both the backend (port 8090) and frontend (port 3000). Open http://localhost:3000 and log in with the admin credentials from `.env`.
 
-### Cargo
+## Project Structure
 
-```sh
-cargo build --release
+```
+mercy/
+  backend/        Rust backend (axum REST API, chromiumoxide, template matching)
+  frontend/       Next.js admin interface (React, Tailwind, shadcn/ui)
+  nix/            NixOS module
+  flake.nix       Nix flake (builds both packages)
+  justfile        Development commands
+  .env.example    Environment variable template
 ```
 
-## Development
+## Environment Variables
 
-There is a `.envrc` in the repo root which allows [direnv](https://direnv.net/) to automatically load the Nix dev shell. If you use direnv:
-
-```sh
-direnv allow
-```
-
-Otherwise, enter the shell manually:
-
-```sh
-nix develop
-```
-
-This provides the Rust toolchain, pkg-config, OpenSSL, and Chromium (on Linux).
-
-### Running locally
-
-Set the required environment variables:
+### Backend
 
 | Variable | Required | Description |
 |----------|----------|-------------|
@@ -45,91 +35,93 @@ Set the required environment variables:
 | `MERCY_TB_EMAIL` | yes | Total Battle login email |
 | `MERCY_TB_PASSWORD` | yes | Total Battle login password |
 | `MERCY_LISTEN_ADDR` | no | Listen address (default `0.0.0.0:8090`) |
-| `MERCY_CHROMIUM_PATH` | no | Path to Chromium binary (auto-detected if unset) |
-| `MERCY_HEADLESS` | no | `true` or `1` for headless mode (default `false`, use `xvfb-run` on servers) |
-| `MERCY_SEARCH_TARGET` | no | Building name to search for (default `Mercenary Exchange`) |
+| `MERCY_CHROMIUM_PATH` | no | Path to Chromium binary |
+| `MERCY_HEADLESS` | no | `true` for headless mode |
+| `MERCY_SEARCH_TARGET` | no | Building name to search for (default `Mercenary Exchange`). Maps to reference image: lowercased, spaces → `_`, plus `_ref.png` (e.g. `"Test Building"` → `test_building_ref.png`). **Quote values with spaces.** |
 
-### Running on macOS
+### Frontend
 
-On macOS, always run with `MERCY_HEADLESS=true` to prevent Chromium from opening a visible window and stealing focus:
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `MERCY_ADMIN_USER` | no | Admin username (default `admin`) |
+| `MERCY_ADMIN_PASSWORD` | yes | Admin password |
+| `MERCY_BACKEND_URL` | no | Backend URL (default `http://127.0.0.1:8090`) |
+| `MERCY_SESSION_SECRET` | yes | Cookie signing secret |
 
+### Platform Notes
+
+**macOS:** Set `MERCY_HEADLESS=true` and `MERCY_CHROMIUM_PATH` to your Chrome path:
 ```sh
-MERCY_HEADLESS=true cargo run
+MERCY_CHROMIUM_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+MERCY_HEADLESS=true
 ```
 
-macOS uses its own system Chromium/Chrome — set `MERCY_CHROMIUM_PATH` if it's not auto-detected:
+**Linux (desktop):** Leave `MERCY_HEADLESS` unset to see the browser window.
 
+**Linux (headless server):** Use `xvfb-run` or set `MERCY_HEADLESS=true`.
+
+## Development
+
+### Prerequisites
+
+Enter the Nix dev shell (provides Rust, bun, just, and dependencies):
 ```sh
-MERCY_CHROMIUM_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
-  MERCY_HEADLESS=true cargo run
+direnv allow    # or: nix develop
 ```
 
-### Running on Linux
-
-On Linux with a display server (e.g. desktop), you can run with a visible browser for debugging:
-
+Install frontend dependencies:
 ```sh
-cargo run
+just install
 ```
 
-On a headless Linux server (no display), use either headless mode or `xvfb-run` to provide a virtual display (needed for WebGL):
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `dev` or `just dev` | Run both backend and frontend |
+| `just backend` | Run backend only |
+| `just frontend` | Run frontend only |
+| `just build` | Build both for release |
+| `just install` | Install frontend dependencies |
+| `just check` | Check backend compiles |
+| `just fmt` | Format backend code |
+| `just stop` | Kill dev processes on ports 8090/3000 |
+| `just clean` | Clean all build artifacts |
+
+## Building
+
+### Nix
 
 ```sh
-# Option 1: headless mode
-MERCY_HEADLESS=true cargo run
-
-# Option 2: xvfb-run (virtual display, better WebGL compatibility)
-xvfb-run -s '-screen 0 1920x1080x24' cargo run
+nix build .#mercy-backend    # Rust backend
+nix build .#mercy-frontend   # Next.js frontend
+nix build                    # Default (backend)
 ```
 
-### Debugging inside `nix develop`
-
-Enter the dev shell via `direnv allow` (if using `.envrc`) or `nix develop`. Then set your env vars:
+### Manual
 
 ```sh
-export MERCY_KINGDOMS=111
-export MERCY_AUTH_TOKEN=dev
-export MERCY_TB_EMAIL=you@example.com
-export MERCY_TB_PASSWORD=hunter2
+cd backend && cargo build --release
+cd frontend && bun run build
 ```
 
-On macOS, run headless:
+## Backend API
 
-```sh
-MERCY_HEADLESS=true cargo run
-```
+All endpoints require `Authorization: Bearer <token>`.
 
-On Linux with a display, run without headless to see the browser:
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/prepare` | Launch browser and log in |
+| POST | `/start` | Start scanning (or resume if paused) |
+| POST | `/stop` | Stop scanning |
+| POST | `/pause` | Pause scanning |
+| POST | `/logout` | Kill browser session |
+| GET | `/status` | Current phase, kingdom, exchange count |
+| GET | `/exchanges` | List of found exchanges |
+| GET | `/screenshot` | PNG screenshot of current browser view |
+| GET | `/goto?k=&x=&y=` | Navigate to coordinates, return screenshot |
 
-```sh
-cargo run
-```
-
-Use the API to control the browser:
-
-```sh
-# Prepare browser + login without scanning
-curl -X POST -H "Authorization: Bearer dev" localhost:8090/prepare
-
-# Navigate to specific coordinates and get a screenshot
-curl -H "Authorization: Bearer dev" "localhost:8090/goto?k=111&x=512&y=512" -o screenshot.png
-
-# Take a screenshot of the current view
-curl -H "Authorization: Bearer dev" localhost:8090/screenshot -o screenshot.png
-
-# Start scanning
-curl -X POST -H "Authorization: Bearer dev" localhost:8090/start
-
-# Check status
-curl -H "Authorization: Bearer dev" localhost:8090/status
-
-# View found exchanges
-curl -H "Authorization: Bearer dev" localhost:8090/exchanges
-```
-
-## NixOS deployment
-
-Import the module and configure the service:
+## NixOS Deployment
 
 ```nix
 {
@@ -137,15 +129,29 @@ Import the module and configure the service:
 
   services.mercy = {
     enable = true;
-    package = mercy.packages.x86_64-linux.default;
+    backendPackage = mercy.packages.x86_64-linux.mercy-backend;
+    frontendPackage = mercy.packages.x86_64-linux.mercy-frontend;
     kingdoms = "109,110,112,113,114";
-    listenPort = 8090;
+    backendPort = 8090;
+    frontendPort = 3000;
+
+    # Shared secret (used by both backend and frontend)
     authTokenFile = "/run/secrets/mercy-auth-token";
+
+    # Backend secrets
     tbEmailFile = "/run/secrets/mercy-email";
     tbPasswordFile = "/run/secrets/mercy-password";
-    # searchTarget = "Mercenary Exchange";  # default
+
+    # Frontend secrets
+    adminUserFile = "/run/secrets/mercy-admin-user";
+    adminPasswordFile = "/run/secrets/mercy-admin-password";
+    sessionSecretFile = "/run/secrets/mercy-session-secret";
+
+    # Optional: nginx reverse proxy
+    domain = "mercy.example.com";
+    nginx.enableSSL = true;
   };
 }
 ```
 
-Secrets are read from files at service start (not baked into the Nix store). The service runs under `DynamicUser` with security hardening. `xvfb-run` provides a virtual display for Chromium's WebGL.
+This creates two systemd services (`mercy-backend` and `mercy-frontend`) with security hardening. When `domain` is set, an nginx virtual host proxies traffic to the frontend. Secrets are read from files at service start.

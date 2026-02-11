@@ -3,21 +3,35 @@
 let
   cfg = config.services.mercy;
 
-  startScript = pkgs.writeShellScript "mercy-start" ''
+  backendStartScript = pkgs.writeShellScript "mercy-backend-start" ''
     set -euo pipefail
     export MERCY_AUTH_TOKEN="$(cat ${cfg.authTokenFile})"
     export MERCY_TB_EMAIL="$(cat ${cfg.tbEmailFile})"
     export MERCY_TB_PASSWORD="$(cat ${cfg.tbPasswordFile})"
-    exec ${pkgs.xvfb-run}/bin/xvfb-run -s '-screen 0 1920x1080x24' ${cfg.package}/bin/mercy
+    exec ${pkgs.xvfb-run}/bin/xvfb-run -s '-screen 0 1920x1080x24' ${cfg.backendPackage}/bin/mercy
+  '';
+
+  frontendStartScript = pkgs.writeShellScript "mercy-frontend-start" ''
+    set -euo pipefail
+    export MERCY_AUTH_TOKEN="$(cat ${cfg.authTokenFile})"
+    export MERCY_ADMIN_USER="$(cat ${cfg.adminUserFile})"
+    export MERCY_ADMIN_PASSWORD="$(cat ${cfg.adminPasswordFile})"
+    export MERCY_SESSION_SECRET="$(cat ${cfg.sessionSecretFile})"
+    exec ${pkgs.bun}/bin/bun ${cfg.frontendPackage}/server.js
   '';
 in
 {
   options.services.mercy = {
     enable = lib.mkEnableOption "Mercy mercenary exchange locator";
 
-    package = lib.mkOption {
+    backendPackage = lib.mkOption {
       type = lib.types.package;
-      description = "The mercy package to use";
+      description = "The mercy backend package to use";
+    };
+
+    frontendPackage = lib.mkOption {
+      type = lib.types.package;
+      description = "The mercy frontend package to use";
     };
 
     kingdoms = lib.mkOption {
@@ -26,15 +40,21 @@ in
       description = "Comma-separated list of kingdom IDs to scan";
     };
 
-    listenPort = lib.mkOption {
+    backendPort = lib.mkOption {
       type = lib.types.port;
       default = 8090;
-      description = "Port for the REST API to listen on";
+      description = "Port for the backend REST API";
+    };
+
+    frontendPort = lib.mkOption {
+      type = lib.types.port;
+      default = 3000;
+      description = "Port for the frontend web UI";
     };
 
     authTokenFile = lib.mkOption {
       type = lib.types.path;
-      description = "File containing the API auth token";
+      description = "File containing the API auth token (shared by backend and frontend)";
     };
 
     tbEmailFile = lib.mkOption {
@@ -45,6 +65,21 @@ in
     tbPasswordFile = lib.mkOption {
       type = lib.types.path;
       description = "File containing Total Battle login password";
+    };
+
+    adminUserFile = lib.mkOption {
+      type = lib.types.path;
+      description = "File containing the admin panel username";
+    };
+
+    adminPasswordFile = lib.mkOption {
+      type = lib.types.path;
+      description = "File containing the admin panel password";
+    };
+
+    sessionSecretFile = lib.mkOption {
+      type = lib.types.path;
+      description = "File containing the session signing secret";
     };
 
     searchTarget = lib.mkOption {
@@ -59,18 +94,30 @@ in
       defaultText = lib.literalExpression "pkgs.chromium";
       description = "Chromium package to use for headless browsing";
     };
+
+    domain = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      description = "Domain for nginx virtual host (enables nginx when set)";
+    };
+
+    nginx.enableSSL = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = "Enable SSL via ACME for the nginx virtual host";
+    };
   };
 
   config = lib.mkIf cfg.enable {
-    systemd.services.mercy = {
-      description = "Mercy - Mercenary Exchange Locator";
+    systemd.services.mercy-backend = {
+      description = "Mercy - Backend";
       after = [ "network-online.target" ];
       wants = [ "network-online.target" ];
       wantedBy = [ "multi-user.target" ];
 
       environment = {
         MERCY_KINGDOMS = cfg.kingdoms;
-        MERCY_LISTEN_ADDR = "0.0.0.0:${toString cfg.listenPort}";
+        MERCY_LISTEN_ADDR = "127.0.0.1:${toString cfg.backendPort}";
         MERCY_CHROMIUM_PATH = "${cfg.chromiumPackage}/bin/chromium";
         MERCY_SEARCH_TARGET = cfg.searchTarget;
       };
@@ -79,14 +126,13 @@ in
         Type = "simple";
         DynamicUser = true;
         StateDirectory = "mercy";
-        WorkingDirectory = "${cfg.package}/share/mercy";
+        WorkingDirectory = "${cfg.backendPackage}/share/mercy";
 
-        ExecStart = startScript;
+        ExecStart = backendStartScript;
 
         Restart = "on-failure";
         RestartSec = 10;
 
-        # Security hardening
         PrivateTmp = true;
         ProtectSystem = "strict";
         ProtectHome = true;
@@ -98,6 +144,57 @@ in
         RestrictSUIDSGID = true;
         MemoryDenyWriteExecute = false; # Chromium needs this
         ReadWritePaths = [ "/var/lib/mercy" ];
+      };
+    };
+
+    systemd.services.mercy-frontend = {
+      description = "Mercy - Frontend";
+      after = [ "mercy-backend.service" ];
+      requires = [ "mercy-backend.service" ];
+      wantedBy = [ "multi-user.target" ];
+
+      environment = {
+        PORT = toString cfg.frontendPort;
+        HOSTNAME = "127.0.0.1";
+        NODE_ENV = "production";
+        MERCY_BACKEND_URL = "http://127.0.0.1:${toString cfg.backendPort}";
+        NEXT_CACHE_DIR = "/var/cache/mercy-frontend";
+      };
+
+      serviceConfig = {
+        Type = "simple";
+        DynamicUser = true;
+        CacheDirectory = "mercy-frontend";
+        WorkingDirectory = "${cfg.frontendPackage}";
+
+        ExecStartPre = "${pkgs.coreutils}/bin/rm -rf /var/cache/mercy-frontend/*";
+        ExecStart = frontendStartScript;
+
+        Restart = "on-failure";
+        RestartSec = 5;
+
+        PrivateTmp = true;
+        ProtectSystem = "strict";
+        ProtectHome = true;
+        NoNewPrivileges = true;
+        ProtectKernelTunables = true;
+        ProtectKernelModules = true;
+        ProtectControlGroups = true;
+        RestrictNamespaces = true;
+        RestrictSUIDSGID = true;
+        MemoryDenyWriteExecute = false;
+        ReadWritePaths = [ "/var/cache/mercy-frontend" ];
+      };
+    };
+
+    services.nginx.virtualHosts = lib.mkIf (cfg.domain != null) {
+      ${cfg.domain} = {
+        forceSSL = cfg.nginx.enableSSL;
+        enableACME = cfg.nginx.enableSSL;
+        locations."/" = {
+          proxyPass = "http://127.0.0.1:${toString cfg.frontendPort}";
+          proxyWebsockets = true;
+        };
       };
     };
   };
