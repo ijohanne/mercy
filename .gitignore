@@ -1,0 +1,8 @@
+/target
+plans/
+issues/
+.env
+.DS_Store
+.direnv/
+debug_*.png
+screenshot.png
