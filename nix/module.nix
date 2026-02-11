@@ -47,6 +47,12 @@ in
       description = "File containing Total Battle login password";
     };
 
+    searchTarget = lib.mkOption {
+      type = lib.types.str;
+      default = "Mercenary Exchange";
+      description = "Building name to search for (determines which reference image to use)";
+    };
+
     chromiumPackage = lib.mkOption {
       type = lib.types.package;
       default = pkgs.chromium;
@@ -66,6 +72,7 @@ in
         MERCY_KINGDOMS = cfg.kingdoms;
         MERCY_LISTEN_ADDR = "0.0.0.0:${toString cfg.listenPort}";
         MERCY_CHROMIUM_PATH = "${cfg.chromiumPackage}/bin/chromium";
+        MERCY_SEARCH_TARGET = cfg.searchTarget;
       };
 
       serviceConfig = {

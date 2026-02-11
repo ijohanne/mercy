@@ -229,16 +229,15 @@ fn deduplicate_matches(matches: &mut [TemplateMatch], min_distance: u32) -> Vec<
 /// 1. `MERCY_ASSETS_DIR` env var (if set)
 /// 2. Relative to CWD (e.g. `./assets/...`)
 /// 3. Relative to the binary's `../share/mercy/` (Nix install layout)
-pub fn load_reference_images() -> Result<Vec<Arc<DynamicImage>>> {
+pub fn load_reference_images(search_target: &str) -> Result<Vec<Arc<DynamicImage>>> {
     let env_assets = std::env::var("MERCY_ASSETS_DIR").ok().map(std::path::PathBuf::from);
 
     let bin_share = std::env::current_exe()
         .ok()
         .and_then(|p| p.parent()?.parent().map(|p| p.join("share/mercy")));
 
-    let filenames = [
-        "test_building_ref.png",
-    ];
+    let base = search_target.to_lowercase().replace(' ', "_");
+    let filenames = [format!("{base}_ref.png")];
 
     let mut images = Vec::new();
 

@@ -35,7 +35,7 @@ async fn main() -> Result<()> {
     );
 
     // Load reference images once at startup
-    let ref_images = detector::load_reference_images()
+    let ref_images = detector::load_reference_images(&config.search_target)
         .context("failed to load reference images")?;
     let ref_images = Arc::new(ref_images);
 

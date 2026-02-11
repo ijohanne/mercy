@@ -7,18 +7,30 @@ use tokio::time::{sleep, Duration};
 
 use crate::browser::{self, GameBrowser};
 use crate::detector;
-use crate::state::{AppState, MercExchange};
+use crate::state::{AppState, MercExchange, ScannerPhase};
 
 /// Max spiral rings from center (limits scan to inner kingdom area).
 const MAX_SCAN_RINGS: u32 = 6;
 
-pub async fn run_scan(state: AppState, ref_images: Arc<Vec<Arc<DynamicImage>>>) -> Result<()> {
-    let config = {
+/// Launch browser and log in if not already done. Sets phase Idle → Preparing → Ready.
+/// If a browser already exists, returns it without relaunching.
+pub async fn prepare_browser(state: &AppState) -> Result<Arc<GameBrowser>> {
+    // Fast path: browser already exists
+    {
         let s = state.lock().await;
+        if let Some(ref browser) = s.browser {
+            return Ok(browser.clone());
+        }
+    }
+
+    // Set phase to Preparing
+    let config = {
+        let mut s = state.lock().await;
+        s.phase = ScannerPhase::Preparing;
         s.config.clone()
     };
 
-    tracing::info!("starting scanner, launching browser");
+    tracing::info!("launching browser");
     let game = Arc::new(
         GameBrowser::launch(&config)
             .await
@@ -36,25 +48,59 @@ pub async fn run_scan(state: AppState, ref_images: Arc<Vec<Arc<DynamicImage>>>) 
         .await
         .context("login failed")?;
 
-    tracing::info!("login complete, starting kingdom scan loop");
+    // Set phase to Ready
+    {
+        let mut s = state.lock().await;
+        s.phase = ScannerPhase::Ready;
+    }
+
+    tracing::info!("browser ready");
+    Ok(game)
+}
+
+/// Check whether the scan loop should continue. If paused, blocks until resumed.
+/// Returns `true` for Scanning, `false` for anything else (stopped, idle, etc.).
+async fn check_should_continue(state: &AppState) -> bool {
+    loop {
+        let (phase, notify) = {
+            let s = state.lock().await;
+            (s.phase, s.pause_notify.clone())
+        };
+        match phase {
+            ScannerPhase::Scanning => return true,
+            ScannerPhase::Paused => {
+                tracing::info!("scanner paused, waiting for resume");
+                notify.notified().await;
+                // Re-check phase after wakeup
+            }
+            _ => return false,
+        }
+    }
+}
+
+pub async fn run_scan(state: AppState, ref_images: Arc<Vec<Arc<DynamicImage>>>) -> Result<()> {
+    let config = {
+        let s = state.lock().await;
+        s.config.clone()
+    };
+
+    let game = prepare_browser(&state).await?;
+
+    // Set phase to Scanning
+    {
+        let mut s = state.lock().await;
+        s.phase = ScannerPhase::Scanning;
+    }
+
+    tracing::info!("starting kingdom scan loop");
+
+    let cooldown = chrono::Duration::minutes(2);
 
     loop {
         for &kingdom in &config.kingdoms {
-            // Check if we should stop
-            {
-                let s = state.lock().await;
-                if !s.running {
-                    tracing::info!("scanner stopped by user");
-                    return Ok(());
-                }
-                if s.is_full() {
-                    tracing::info!("all exchanges found, stopping");
-                    // Drop s before re-acquiring to avoid deadlock
-                    drop(s);
-                    let mut s = state.lock().await;
-                    s.running = false;
-                    return Ok(());
-                }
+            if !check_should_continue(&state).await {
+                tracing::info!("scanner stopped");
+                return Ok(());
             }
 
             // Update current kingdom
@@ -63,15 +109,105 @@ pub async fn run_scan(state: AppState, ref_images: Arc<Vec<Arc<DynamicImage>>>) 
                 s.current_kingdom = Some(kingdom);
             }
 
-            tracing::info!("scanning kingdom {kingdom}");
+            // Cooldown + re-verification logic
+            let (last_scan, known_exchange) = {
+                let s = state.lock().await;
+                (s.last_scan_time(kingdom), s.exchange_for_kingdom(kingdom))
+            };
 
+            if let Some(last) = last_scan {
+                let elapsed = Utc::now() - last;
+                if elapsed < cooldown {
+                    if let Some((ex, ey)) = known_exchange {
+                        // Re-verify: navigate to known location, check if still there
+                        tracing::info!("kingdom {kingdom}: re-verifying exchange at ({ex}, {ey})");
+                        match verify_exchange(&game, kingdom, ex, ey, &ref_images).await {
+                            Ok(true) => {
+                                tracing::info!("kingdom {kingdom}: exchange still present");
+                                let mut s = state.lock().await;
+                                s.refresh_exchange(kingdom, ex, ey);
+                                let remaining = (cooldown - elapsed)
+                                    .to_std()
+                                    .unwrap_or_default();
+                                drop(s);
+                                sleep(remaining).await;
+                                continue;
+                            }
+                            Ok(false) => {
+                                tracing::info!("kingdom {kingdom}: exchange gone, removing");
+                                let mut s = state.lock().await;
+                                s.remove_exchange(kingdom);
+                                // Fall through to full scan
+                            }
+                            Err(e) => {
+                                tracing::warn!("kingdom {kingdom}: verify failed: {e:#}");
+                                // Fall through to full scan
+                            }
+                        }
+                    } else {
+                        // No known exchange but recently scanned — wait out cooldown
+                        tracing::info!("kingdom {kingdom}: cooldown active, waiting");
+                        let remaining = (cooldown - elapsed)
+                            .to_std()
+                            .unwrap_or_default();
+                        sleep(remaining).await;
+                        // Fall through to full scan after cooldown
+                    }
+                }
+            }
+
+            // Full spiral scan
+            tracing::info!("scanning kingdom {kingdom}");
             if let Err(e) = scan_kingdom(&game, &state, kingdom, &ref_images, &config.search_target).await {
                 tracing::error!("error scanning kingdom {kingdom}: {e:#}");
-                // Continue to next kingdom on error
+            }
+
+            {
+                let mut s = state.lock().await;
+                s.set_last_scan_time(kingdom);
             }
         }
 
         tracing::info!("completed scan pass, restarting");
+    }
+}
+
+/// Navigate to known exchange coordinates, screenshot, and check if the exchange
+/// is still visible near screen center (within ~80px, score >= 0.90).
+async fn verify_exchange(
+    game: &GameBrowser,
+    kingdom: u32,
+    x: u32,
+    y: u32,
+    ref_images: &[Arc<DynamicImage>],
+) -> Result<bool> {
+    game.navigate_to_coords(kingdom, x, y).await?;
+    sleep(Duration::from_secs(2)).await;
+
+    let screenshot_bytes = game
+        .take_screenshot()
+        .await
+        .context("failed to take verification screenshot")?;
+
+    let screenshot = image::load_from_memory(&screenshot_bytes)
+        .context("failed to decode verification screenshot")?;
+
+    match detector::find_best_match(&screenshot, ref_images) {
+        Some(m) => {
+            let err_x = (m.x as f64 - SCREEN_CENTER_X).abs();
+            let err_y = (m.y as f64 - SCREEN_CENTER_Y).abs();
+            let near_center = err_x < 80.0 && err_y < 80.0;
+            let good_score = m.score >= 0.90;
+            tracing::info!(
+                "verify K:{kingdom} ({x},{y}): pixel ({},{}) score={:.4} err=({err_x:.0},{err_y:.0}) near={near_center} good={good_score}",
+                m.x, m.y, m.score
+            );
+            Ok(near_center && good_score)
+        }
+        None => {
+            tracing::info!("verify K:{kingdom} ({x},{y}): no match found");
+            Ok(false)
+        }
     }
 }
 
@@ -98,12 +234,8 @@ async fn scan_kingdom(
     tracing::info!("scanning {} positions in kingdom {kingdom}", steps.len());
 
     for (i, (dx, dy)) in steps.iter().enumerate() {
-        // Check if we should stop
-        {
-            let s = state.lock().await;
-            if !s.running || s.is_full() {
-                return Ok(());
-            }
+        if !check_should_continue(state).await {
+            return Ok(());
         }
 
         // First position (0,0) = current view, no drag needed
