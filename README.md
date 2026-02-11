@@ -49,54 +49,82 @@ Set the required environment variables:
 | `MERCY_HEADLESS` | no | `true` or `1` for headless mode (default `false`, use `xvfb-run` on servers) |
 | `MERCY_SEARCH_TARGET` | no | Building name to search for (default `Mercenary Exchange`) |
 
-Then run:
+### Running on macOS
+
+On macOS, always run with `MERCY_HEADLESS=true` to prevent Chromium from opening a visible window and stealing focus:
+
+```sh
+MERCY_HEADLESS=true cargo run
+```
+
+macOS uses its own system Chromium/Chrome — set `MERCY_CHROMIUM_PATH` if it's not auto-detected:
+
+```sh
+MERCY_CHROMIUM_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+  MERCY_HEADLESS=true cargo run
+```
+
+### Running on Linux
+
+On Linux with a display server (e.g. desktop), you can run with a visible browser for debugging:
 
 ```sh
 cargo run
 ```
 
-### Debugging inside `nix develop`
-
-Since the game requires a browser with WebGL, local debugging works best with a visible browser (headless mode off, which is the default). Inside `nix develop`:
-
-1. Set your env vars (or use a `.env` file with a tool like `dotenv`):
-   ```sh
-   export MERCY_KINGDOMS=111
-   export MERCY_AUTH_TOKEN=dev
-   export MERCY_TB_EMAIL=you@example.com
-   export MERCY_TB_PASSWORD=hunter2
-   ```
-
-2. Run the server:
-   ```sh
-   cargo run
-   ```
-
-3. Use the API to control the browser:
-   ```sh
-   # Prepare browser + login without scanning
-   curl -X POST -H "Authorization: Bearer dev" localhost:8090/prepare
-
-   # Navigate to specific coordinates and get a screenshot
-   curl -H "Authorization: Bearer dev" "localhost:8090/goto?k=111&x=512&y=512" -o screenshot.png
-
-   # Take a screenshot of the current view
-   curl -H "Authorization: Bearer dev" localhost:8090/screenshot -o screenshot.png
-
-   # Start scanning
-   curl -X POST -H "Authorization: Bearer dev" localhost:8090/start
-
-   # Check status
-   curl -H "Authorization: Bearer dev" localhost:8090/status
-
-   # View found exchanges
-   curl -H "Authorization: Bearer dev" localhost:8090/exchanges
-   ```
-
-On a headless Linux server, wrap with `xvfb-run`:
+On a headless Linux server (no display), use either headless mode or `xvfb-run` to provide a virtual display (needed for WebGL):
 
 ```sh
+# Option 1: headless mode
+MERCY_HEADLESS=true cargo run
+
+# Option 2: xvfb-run (virtual display, better WebGL compatibility)
 xvfb-run -s '-screen 0 1920x1080x24' cargo run
+```
+
+### Debugging inside `nix develop`
+
+Enter the dev shell via `direnv allow` (if using `.envrc`) or `nix develop`. Then set your env vars:
+
+```sh
+export MERCY_KINGDOMS=111
+export MERCY_AUTH_TOKEN=dev
+export MERCY_TB_EMAIL=you@example.com
+export MERCY_TB_PASSWORD=hunter2
+```
+
+On macOS, run headless:
+
+```sh
+MERCY_HEADLESS=true cargo run
+```
+
+On Linux with a display, run without headless to see the browser:
+
+```sh
+cargo run
+```
+
+Use the API to control the browser:
+
+```sh
+# Prepare browser + login without scanning
+curl -X POST -H "Authorization: Bearer dev" localhost:8090/prepare
+
+# Navigate to specific coordinates and get a screenshot
+curl -H "Authorization: Bearer dev" "localhost:8090/goto?k=111&x=512&y=512" -o screenshot.png
+
+# Take a screenshot of the current view
+curl -H "Authorization: Bearer dev" localhost:8090/screenshot -o screenshot.png
+
+# Start scanning
+curl -X POST -H "Authorization: Bearer dev" localhost:8090/start
+
+# Check status
+curl -H "Authorization: Bearer dev" localhost:8090/status
+
+# View found exchanges
+curl -H "Authorization: Bearer dev" localhost:8090/exchanges
 ```
 
 ## NixOS deployment
