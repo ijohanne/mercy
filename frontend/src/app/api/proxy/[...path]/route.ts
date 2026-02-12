@@ -38,6 +38,8 @@ async function proxyRequest(request: NextRequest, params: Promise<{ path: string
     const responseHeaders = new Headers();
     const ct = backendRes.headers.get('content-type');
     if (ct) responseHeaders.set('content-type', ct);
+    const cd = backendRes.headers.get('content-disposition');
+    if (cd) responseHeaders.set('content-disposition', cd);
 
     return new NextResponse(backendRes.body, {
       status: backendRes.status,

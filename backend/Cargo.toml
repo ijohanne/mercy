@@ -2,6 +2,7 @@
 name = "mercy"
 version = "0.1.0"
 edition = "2024"
+default-run = "mercy"
 
 [dependencies]
 anyhow = "1"

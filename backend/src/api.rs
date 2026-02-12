@@ -1,18 +1,18 @@
 use std::sync::Arc;
 
-use axum::extract::{Query, State};
+use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use image::DynamicImage;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
+use crate::detector::{self, PreparedRef};
 use crate::scanner;
 use crate::state::{AppState, ScannerPhase};
 
-pub fn router(state: AppState, ref_images: Arc<Vec<Arc<DynamicImage>>>) -> Router {
+pub fn router(state: AppState, ref_images: Arc<Vec<PreparedRef>>) -> Router {
     Router::new()
         .route("/start", post(start_scan))
         .route("/stop", post(stop_scan))
@@ -21,8 +21,10 @@ pub fn router(state: AppState, ref_images: Arc<Vec<Arc<DynamicImage>>>) -> Route
         .route("/logout", post(logout_session))
         .route("/status", get(get_status))
         .route("/exchanges", get(get_exchanges))
+        .route("/exchanges/{index}/screenshot", get(get_exchange_screenshot))
         .route("/screenshot", get(get_screenshot))
         .route("/goto", get(goto_coords))
+        .route("/detect", get(detect_match))
         .with_state(ApiState {
             app: state,
             ref_images,
@@ -32,7 +34,7 @@ pub fn router(state: AppState, ref_images: Arc<Vec<Arc<DynamicImage>>>) -> Route
 #[derive(Clone)]
 struct ApiState {
     app: AppState,
-    ref_images: Arc<Vec<Arc<DynamicImage>>>,
+    ref_images: Arc<Vec<PreparedRef>>,
 }
 
 fn check_auth(headers: &HeaderMap, expected_token: &str) -> Result<(), StatusCode> {
@@ -251,6 +253,27 @@ async fn get_exchanges(
     Ok(Json(state.exchanges.clone()))
 }
 
+async fn get_exchange_screenshot(
+    State(api): State<ApiState>,
+    headers: HeaderMap,
+    Path(index): Path<usize>,
+) -> Result<impl IntoResponse, StatusCode> {
+    let state = api.app.lock().await;
+    check_auth(&headers, &state.config.auth_token)?;
+
+    let exchange = state.exchanges.get(index).ok_or(StatusCode::NOT_FOUND)?;
+    let png = exchange.screenshot_png.clone().ok_or(StatusCode::NOT_FOUND)?;
+    let filename = format!("exchange_k{}_{}_{}.png", exchange.kingdom, exchange.x, exchange.y);
+
+    Ok((
+        [
+            (header::CONTENT_TYPE, "image/png".to_owned()),
+            (header::CONTENT_DISPOSITION, format!("inline; filename=\"{filename}\"")),
+        ],
+        png,
+    ))
+}
+
 async fn get_screenshot(
     State(api): State<ApiState>,
     headers: HeaderMap,
@@ -269,7 +292,16 @@ async fn get_screenshot(
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 
-    Ok(([(header::CONTENT_TYPE, "image/png")], png_bytes))
+    // Store for detect to reuse
+    api.app.lock().await.last_screenshot = Some(png_bytes.clone());
+
+    Ok((
+        [
+            (header::CONTENT_TYPE, "image/png".to_owned()),
+            (header::CONTENT_DISPOSITION, "inline; filename=\"screenshot.png\"".to_owned()),
+        ],
+        png_bytes,
+    ))
 }
 
 #[derive(Deserialize)]
@@ -306,5 +338,78 @@ async fn goto_coords(
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 
-    Ok(([(header::CONTENT_TYPE, "image/png")], png_bytes))
+    // Store for detect to reuse
+    api.app.lock().await.last_screenshot = Some(png_bytes.clone());
+
+    let filename = format!("goto_k{}_{}_{}.png", params.k, params.x, params.y);
+    Ok((
+        [
+            (header::CONTENT_TYPE, "image/png".to_owned()),
+            (header::CONTENT_DISPOSITION, format!("inline; filename=\"{filename}\"")),
+        ],
+        png_bytes,
+    ))
+}
+
+#[derive(Serialize)]
+struct DetectResponse {
+    found: bool,
+    threshold: f32,
+    pixel_x: Option<u32>,
+    pixel_y: Option<u32>,
+    score: Option<f32>,
+    game_dx: Option<i32>,
+    game_dy: Option<i32>,
+}
+
+async fn detect_match(
+    State(api): State<ApiState>,
+    headers: HeaderMap,
+) -> Result<impl IntoResponse, StatusCode> {
+    let state = api.app.lock().await;
+    check_auth(&headers, &state.config.auth_token)?;
+
+    // Reuse the last screenshot from goto/refresh instead of taking a new one,
+    // because the game view drifts after navigation.
+    let png_bytes = state.last_screenshot.clone().ok_or_else(|| {
+        tracing::error!("no screenshot available — use goto or refresh first");
+        StatusCode::BAD_REQUEST
+    })?;
+    drop(state);
+
+    let screenshot = image::load_from_memory(&png_bytes).map_err(|e| {
+        tracing::error!("decode failed: {e:#}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let best = detector::find_best_match(&screenshot, &api.ref_images);
+
+    // Lower threshold for manual testing — scanner uses MATCH_THRESHOLD
+    const DETECT_THRESHOLD: f32 = 0.88;
+
+    let resp = match best {
+        Some(m) => {
+            let (gdx, gdy) = scanner::pixel_to_game_offset(m.x, m.y);
+            DetectResponse {
+                found: m.score >= DETECT_THRESHOLD,
+                threshold: DETECT_THRESHOLD,
+                pixel_x: Some(m.x),
+                pixel_y: Some(m.y),
+                score: Some(m.score),
+                game_dx: Some(gdx),
+                game_dy: Some(gdy),
+            }
+        }
+        None => DetectResponse {
+            found: false,
+            threshold: DETECT_THRESHOLD,
+            pixel_x: None,
+            pixel_y: None,
+            score: None,
+            game_dx: None,
+            game_dy: None,
+        },
+    };
+
+    Ok(Json(resp))
 }

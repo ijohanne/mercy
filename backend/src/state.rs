@@ -25,6 +25,13 @@ pub struct MercExchange {
     pub x: u32,
     pub y: u32,
     pub found_at: DateTime<Utc>,
+    /// How long the scan took to find this exchange (seconds).
+    pub scan_duration_secs: Option<f64>,
+    /// true = coordinates parsed from popup, false = calibration estimate.
+    pub confirmed: bool,
+    /// Screenshot taken after clicking the match (PNG bytes).
+    #[serde(skip)]
+    pub screenshot_png: Option<Vec<u8>>,
 }
 
 pub struct AppStateInner {
@@ -36,6 +43,8 @@ pub struct AppStateInner {
     pub browser: Option<Arc<GameBrowser>>,
     pub pause_notify: Arc<Notify>,
     pub last_kingdom_scan: HashMap<u32, DateTime<Utc>>,
+    /// Last screenshot taken (by goto or refresh), reused by detect.
+    pub last_screenshot: Option<Vec<u8>>,
 }
 
 pub type AppState = Arc<Mutex<AppStateInner>>;
@@ -51,6 +60,7 @@ impl AppStateInner {
             browser: None,
             pause_notify: Arc::new(Notify::new()),
             last_kingdom_scan: HashMap::new(),
+            last_screenshot: None,
         }
     }
 

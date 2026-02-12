@@ -34,12 +34,12 @@ async fn main() -> Result<()> {
         config.search_target,
     );
 
-    // Load reference images once at startup
-    let ref_images = detector::load_reference_images(&config.search_target)
+    // Load reference images once at startup and pre-compute downscaled grayscale versions
+    let raw_ref_images = detector::load_reference_images(&config.search_target)
         .context("failed to load reference images")?;
-    let ref_images = Arc::new(ref_images);
+    tracing::info!("loaded {} reference image(s)", raw_ref_images.len());
 
-    tracing::info!("loaded {} reference image(s)", ref_images.len());
+    let ref_images = Arc::new(detector::prepare_reference_images(&raw_ref_images));
 
     let state: crate::state::AppState = Arc::new(Mutex::new(AppStateInner::new(config.clone())));
 

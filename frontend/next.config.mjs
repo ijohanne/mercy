@@ -15,12 +15,7 @@ const nextConfig = {
   reactStrictMode: true,
   devIndicators: false,
 
-  logging: {
-    fetches: {
-      fullUrl: false,
-      hmrRefreshes: false,
-    },
-  },
+  logging: false,
 };
 
 export default nextConfig;

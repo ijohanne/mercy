@@ -88,6 +88,30 @@ in
       description = "Building name to search for (determines which reference image to use)";
     };
 
+    navigateDelayMs = lib.mkOption {
+      type = lib.types.int;
+      default = 750;
+      description = "Fly-animation wait after coordinate navigation, in milliseconds";
+    };
+
+    scanPattern = lib.mkOption {
+      type = lib.types.str;
+      default = "wide";
+      description = "Scan pattern: single, multi, wide, grid";
+    };
+
+    scanRings = lib.mkOption {
+      type = lib.types.nullOr lib.types.int;
+      default = null;
+      description = "Override ring count per scan pattern (null = use pattern default)";
+    };
+
+    exchangeLog = lib.mkOption {
+      type = lib.types.str;
+      default = "exchanges.jsonl";
+      description = "Path to exchange detection JSONL log file";
+    };
+
     chromiumPackage = lib.mkOption {
       type = lib.types.package;
       default = pkgs.chromium;
@@ -120,6 +144,11 @@ in
         MERCY_LISTEN_ADDR = "127.0.0.1:${toString cfg.backendPort}";
         MERCY_CHROMIUM_PATH = "${cfg.chromiumPackage}/bin/chromium";
         MERCY_SEARCH_TARGET = cfg.searchTarget;
+        MERCY_NAVIGATE_DELAY_MS = toString cfg.navigateDelayMs;
+        MERCY_SCAN_PATTERN = cfg.scanPattern;
+        MERCY_EXCHANGE_LOG = cfg.exchangeLog;
+      } // lib.optionalAttrs (cfg.scanRings != null) {
+        MERCY_SCAN_RINGS = toString cfg.scanRings;
       };
 
       serviceConfig = {

@@ -26,6 +26,7 @@ pub struct GameBrowser {
     _browser: Browser,
     _profile_dir: tempfile::TempDir,
     page: Page,
+    navigate_delay: Duration,
 }
 
 impl GameBrowser {
@@ -92,7 +93,12 @@ impl GameBrowser {
         .await
         .context("failed to inject webdriver override")?;
 
-        Ok(GameBrowser { _browser: browser, _profile_dir: user_data_dir, page })
+        Ok(GameBrowser {
+            _browser: browser,
+            _profile_dir: user_data_dir,
+            page,
+            navigate_delay: Duration::from_millis(config.navigate_delay_ms),
+        })
     }
 
     pub async fn login(&self, email: &str, password: &str) -> Result<()> {
@@ -249,6 +255,7 @@ impl GameBrowser {
 
     /// Navigate to the center of the given kingdom by using the minimap search dialog.
     /// Clicks the magnifying glass icon above the minimap, fills in K/X/Y, and clicks Go.
+    #[allow(dead_code)]
     pub async fn go_to_kingdom(&self, kingdom: u32) -> Result<()> {
         self.navigate_to_coords(kingdom, 512, 512).await
     }
@@ -259,41 +266,28 @@ impl GameBrowser {
         // Click the magnifying glass icon (2nd button above the minimap)
         tracing::info!("opening coordinate search dialog");
         self.click_at_cdp_full(83.0, 865.0).await?;
-        sleep(Duration::from_secs(1)).await;
+        sleep(Duration::from_millis(250)).await;
 
-        // Type coordinates into the dialog fields.
-        // The dialog has 3 fields: K, X, Y with a "Go" button.
-        // We need to click each field, clear it, and type the value.
-        // Field positions will need calibration - these are estimates.
-
-        // For now, type the coordinates using keyboard after the dialog opens.
-        // The K field should be focused by default.
+        // K field should be focused by default.
+        // Character typing uses CDP; Tab/Enter use JS canvas dispatch.
         self.select_all_and_type(&kingdom.to_string()).await?;
-        sleep(Duration::from_millis(200)).await;
+        sleep(Duration::from_millis(75)).await;
 
         // Tab to X field
         self.send_canvas_tab().await;
-        sleep(Duration::from_millis(200)).await;
+        sleep(Duration::from_millis(75)).await;
         self.select_all_and_type(&x.to_string()).await?;
-        sleep(Duration::from_millis(200)).await;
+        sleep(Duration::from_millis(75)).await;
 
         // Tab to Y field
         self.send_canvas_tab().await;
-        sleep(Duration::from_millis(200)).await;
+        sleep(Duration::from_millis(75)).await;
         self.select_all_and_type(&y.to_string()).await?;
-        sleep(Duration::from_millis(200)).await;
+        sleep(Duration::from_millis(75)).await;
 
-        // Press Enter to confirm (or click Go button)
+        // Press Enter to confirm — dialog auto-closes and game flies to destination
         self.send_canvas_enter().await;
-        sleep(Duration::from_secs(2)).await;
-
-        // Close the coordinate dialog by clicking the X button at top-right of dialog
-        self.click_at_cdp_full(1150.0, 460.0).await.ok();
-        sleep(Duration::from_millis(500)).await;
-
-        // Dismiss any popup accidentally opened by the close click hitting the map
-        self.send_canvas_escape().await;
-        sleep(Duration::from_millis(300)).await;
+        sleep(self.navigate_delay).await;
 
         tracing::info!("navigated to K:{kingdom} X:{x} Y:{y}");
         Ok(())
@@ -301,6 +295,7 @@ impl GameBrowser {
 
     /// Drag the map by (dx, dy) pixels. Positive dx moves the viewport right
     /// (drags left), positive dy moves viewport down (drags up).
+    #[allow(dead_code)]
     pub async fn drag_map(&self, dx: i32, dy: i32) -> Result<()> {
         use chromiumoxide::cdp::browser_protocol::input::{
             DispatchMouseEventParams, DispatchMouseEventType, MouseButton,

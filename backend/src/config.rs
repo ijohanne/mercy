@@ -21,6 +21,16 @@ pub struct Config {
     pub headless: bool,
     /// Name of the tile to search for in popup confirmation (e.g. "Taotie", "Mercenary Exchange")
     pub search_target: String,
+    /// Write debug screenshots to disk every scan step (default false)
+    pub debug_screenshots: bool,
+    /// Fly-animation wait after navigate_to_coords, in milliseconds (default 2000)
+    pub navigate_delay_ms: u64,
+    /// Scan pattern: "single", "multi", "wide", "grid" (default "wide")
+    pub scan_pattern: String,
+    /// Override ring count per pattern (None = use pattern default)
+    pub scan_rings: Option<u32>,
+    /// Path to exchange JSONL log file (default "exchanges.jsonl")
+    pub exchange_log: String,
 }
 
 impl Config {
@@ -56,6 +66,25 @@ impl Config {
         let search_target =
             std::env::var("MERCY_SEARCH_TARGET").unwrap_or_else(|_| "Mercenary Exchange".into());
 
+        let debug_screenshots = std::env::var("MERCY_DEBUG_SCREENSHOTS")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+
+        let navigate_delay_ms = std::env::var("MERCY_NAVIGATE_DELAY_MS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(750);
+
+        let scan_pattern =
+            std::env::var("MERCY_SCAN_PATTERN").unwrap_or_else(|_| "wide".into());
+
+        let scan_rings = std::env::var("MERCY_SCAN_RINGS")
+            .ok()
+            .and_then(|v| v.parse().ok());
+
+        let exchange_log =
+            std::env::var("MERCY_EXCHANGE_LOG").unwrap_or_else(|_| "exchanges.jsonl".into());
+
         Ok(Config {
             kingdoms,
             auth_token,
@@ -65,6 +94,11 @@ impl Config {
             chromium_path,
             headless,
             search_target,
+            debug_screenshots,
+            navigate_delay_ms,
+            scan_pattern,
+            scan_rings,
+            exchange_log,
         })
     }
 }

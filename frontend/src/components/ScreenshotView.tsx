@@ -21,14 +21,29 @@ export default function ScreenshotView() {
     }
   }, [imgUrl]);
 
+  const download = useCallback(() => {
+    if (!imgUrl) return;
+    const a = document.createElement('a');
+    a.href = imgUrl;
+    a.download = `screenshot_${new Date().toISOString().replace(/[:.]/g, '-')}.png`;
+    a.click();
+  }, [imgUrl]);
+
   return (
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center justify-between">
           Screenshot
-          <Button onClick={refresh} variant="outline" size="sm" loading={loading}>
-            Refresh
-          </Button>
+          <div className="flex gap-2">
+            {imgUrl && (
+              <Button onClick={download} variant="outline" size="sm">
+                Download
+              </Button>
+            )}
+            <Button onClick={refresh} variant="outline" size="sm" loading={loading}>
+              Refresh
+            </Button>
+          </div>
         </CardTitle>
       </CardHeader>
       <CardContent>

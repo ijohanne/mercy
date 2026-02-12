@@ -21,4 +21,6 @@ export interface Exchange {
   x: number;
   y: number;
   found_at: string;
+  scan_duration_secs: number | null;
+  confirmed: boolean;
 }

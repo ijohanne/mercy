@@ -2,6 +2,15 @@
 
 Mercenary Exchange Locator Service -- a Rust backend that automates finding special tiles in the Total Battle browser game using headless Chromium and template matching, with a Next.js admin interface for browser-based control.
 
+- [Quick Start](#quick-start)
+- [Project Structure](#project-structure)
+- [Environment Variables](#environment-variables)
+- [Development](#development)
+- [Building](#building)
+- [Backend API](#backend-api)
+- [NixOS Deployment](#nixos-deployment)
+- [Documentation](#documentation)
+
 ## Quick Start
 
 ```sh
@@ -155,3 +164,7 @@ All endpoints require `Authorization: Bearer <token>`.
 ```
 
 This creates two systemd services (`mercy-backend` and `mercy-frontend`) with security hardening. When `domain` is set, an nginx virtual host proxies traffic to the frontend. Secrets are read from files at service start.
+
+## Documentation
+
+- [Scanning](docs/scanning.md) -- coordinate system, exchange spawn distribution, scan pattern algorithms, exchange logging
