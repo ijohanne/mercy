@@ -139,6 +139,16 @@ in
   };
 
   config = lib.mkIf cfg.enable {
+    users.users.mercy = {
+      isSystemUser = true;
+      group = "mercy";
+      description = "Mercy service user";
+      home = "/var/lib/mercy";
+      createHome = true;
+    };
+
+    users.groups.mercy = { };
+
     systemd.services.mercy-backend = {
       description = "Mercy - Backend";
       after = [ "network-online.target" ];
@@ -161,7 +171,8 @@ in
 
       serviceConfig = {
         Type = "simple";
-        DynamicUser = true;
+        User = "mercy";
+        Group = "mercy";
         StateDirectory = "mercy";
         WorkingDirectory = "${cfg.backendPackage}/share/mercy";
 
@@ -200,7 +211,8 @@ in
 
       serviceConfig = {
         Type = "simple";
-        DynamicUser = true;
+        User = "mercy";
+        Group = "mercy";
         CacheDirectory = "mercy-frontend";
         WorkingDirectory = "${cfg.frontendPackage}";
 
