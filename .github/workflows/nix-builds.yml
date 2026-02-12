@@ -1,0 +1,81 @@
+name: Nix Builds
+
+on:
+  push:
+    branches: [ master ]
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+      - 'flake.nix'
+      - 'flake.lock'
+      - 'nix/**'
+      - '.github/workflows/nix-builds.yml'
+  pull_request:
+    branches: [ master ]
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+      - 'flake.nix'
+      - 'flake.lock'
+      - 'nix/**'
+      - '.github/workflows/nix-builds.yml'
+
+jobs:
+  build-backend:
+    name: Build Backend Package
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v25
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+
+      - name: Build backend package
+        run: nix build .#mercy-backend --print-build-logs
+
+      - name: Check backend binary
+        run: |
+          if [ -f result/bin/mercy ]; then
+            echo "Backend binary built successfully"
+          else
+            echo "Backend binary not found!"
+            exit 1
+          fi
+
+      - name: Check assets directory
+        run: |
+          if [ -d result/share/mercy/assets ]; then
+            echo "Assets directory included in package"
+            ls -la result/share/mercy/assets/
+          else
+            echo "Warning: Assets directory not found in package"
+          fi
+
+  build-frontend:
+    name: Build Frontend Package
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v25
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+
+      - name: Build frontend package
+        run: nix build .#mercy-frontend --print-build-logs
+
+      - name: Check frontend build output
+        run: test -f result/server.js && echo "Frontend built successfully"

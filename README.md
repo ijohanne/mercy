@@ -1,5 +1,8 @@
 # Mercy
 
+![Backend Checks](https://github.com/ijohanne/mercy/actions/workflows/backend-checks.yml/badge.svg?branch=master)
+![Nix Builds](https://github.com/ijohanne/mercy/actions/workflows/nix-builds.yml/badge.svg?branch=master)
+
 Mercenary Exchange Locator Service -- a Rust backend that automates finding special tiles in the Total Battle browser game using headless Chromium and template matching, with a Next.js admin interface for browser-based control.
 
 - [Quick Start](#quick-start)
