@@ -968,8 +968,8 @@ mod tests {
     fn test_grid_within_bounds() {
         let positions = grid_scan_positions();
         for &(x, y) in &positions {
-            assert!(x >= 30 && x <= 970, "x={x} out of expected range");
-            assert!(y >= 30 && y <= 970, "y={y} out of expected range");
+            assert!((30..=970).contains(&x), "x={x} out of expected range");
+            assert!((30..=970).contains(&y), "y={y} out of expected range");
         }
     }
 
