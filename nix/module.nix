@@ -96,7 +96,7 @@ in
 
     scanPattern = lib.mkOption {
       type = lib.types.str;
-      default = "wide";
+      default = "grid";
       description = "Scan pattern: single, multi, wide, grid";
     };
 

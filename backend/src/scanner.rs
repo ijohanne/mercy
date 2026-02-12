@@ -278,7 +278,7 @@ async fn scan_kingdom(
         "multi" => multi_spiral_positions(SCAN_STEP, config.scan_rings.unwrap_or(4)),
         "wide" => wide_spiral_positions(config.scan_rings.unwrap_or(9)),
         "grid" => grid_scan_positions(),
-        _ => wide_spiral_positions(config.scan_rings.unwrap_or(9)),
+        _ => grid_scan_positions(),
     };
     let total = positions.len();
     tracing::info!(

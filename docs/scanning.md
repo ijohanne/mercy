@@ -6,9 +6,9 @@ How the scanner navigates the game map and finds exchanges.
 - [Exchange spawn distribution](#exchange-spawn-distribution)
 - [Viewport geometry](#viewport-geometry)
 - [Scan patterns](#scan-patterns)
+  - [`wide` -- single large spiral](#wide----single-large-spiral)
   - [`multi` -- 9 interleaved spirals](#multi----9-interleaved-spirals)
-  - [`wide` -- single large spiral](#wide-default----single-large-spiral)
-  - [`grid` -- full map sweep](#grid----full-map-sweep)
+  - [`grid` -- full map sweep](#grid-default----full-map-sweep)
   - [`single` -- small spiral](#single----small-spiral)
 - [Exchange logging](#exchange-logging)
 
@@ -110,6 +110,8 @@ X axis:                              Y axis:
 
 Exchanges cluster near the edges and avoid the 300-600 center band. The 200-299 and 800-899 bins are the most populated on both axes.
 
+> **Note:** 41 unique points is a small sample. As `exchanges.jsonl` accumulates confirmed locations, this analysis should be updated to verify the donut-shaped distribution holds and to check whether any map regions are underrepresented.
+
 ## Viewport geometry
 
 At 25% zoom the browser viewport (1920x1080) shows approximately **34 x 33 game tiles** of usable detection area. The exact usable center is at pixel (760, 400) due to UI elements (minimap, toolbars, etc.) shifting the playable viewport.
@@ -118,7 +120,45 @@ This means a scan position at game coordinate (X, Y) can detect buildings within
 
 ## Scan patterns
 
-Set via `MERCY_SCAN_PATTERN` (default: `wide`). Override ring count with `MERCY_SCAN_RINGS`.
+Set via `MERCY_SCAN_PATTERN` (default: `grid`). Override ring count with `MERCY_SCAN_RINGS`.
+
+All time estimates assume ~2.2 seconds per position (750ms navigate delay + screenshot + detection overlap). Detection rates are computed against 41 example locations using a ±17 tile viewport radius (i.e. whether any scan position actually passes close enough to detect each exchange, not just bounding-box coverage).
+
+### Average time to first detection
+
+| Pattern | Finds | Avg | Median | Min | Max |
+|---------|-------|-----|--------|-----|-----|
+| `wide` | 19/41 | 7.3 min | 6.9 min | 3.0 min | 12.1 min |
+| `multi` | 22/41 | 11.6 min | 10.9 min | 0.2 min | 26.4 min |
+| `grid` | **41/41** | 20.2 min | 22.3 min | 0.6 min | 35.6 min |
+| `single` | 0/41 | -- | -- | -- | -- |
+
+`wide` and `multi` are faster when they find something, but their deterministic positions leave permanent blind spots -- no number of repeated passes will detect exchanges in those gaps. `grid` guarantees detection within a single pass.
+
+> **Note:** These statistics are based on only 41 unique sample points. More data from `exchanges.jsonl` will improve confidence in these numbers and may shift the optimal default. Re-run this analysis as the dataset grows.
+
+### `wide` -- single large spiral
+
+A single spiral centered at (512, 512) with step=50 (double the normal step). The large step allows many more rings before hitting the map boundary.
+
+- **Default rings**: 9
+- **Coverage area**: center +/- (50 x 9) = +/- 450 tiles -> range 62-962
+- **Positions**: 361 (after clamp dedup)
+- **Gaps within coverage**: step (50) minus viewport width (34) = 16 tile gaps between adjacent positions. Buildings in these gaps are not detected.
+- **Detection rate on example data**: 19/41 = **46%**
+
+Best balance of speed and reach. Covers the full map area quickly, though the 16-tile inter-position gaps reduce actual detection below the area coverage.
+
+| Time | Positions | Exchanges detectable | % |
+|------|-----------|---------------------|---|
+| 0s | 0/361 | 0/41 | 0% |
+| 20s | 10/361 | 0/41 | 0% |
+| 1 min | 28/361 | 0/41 | 0% |
+| 2 min | 55/361 | 0/41 | 0% |
+| 5 min | 137/361 | 2/41 | 4% |
+| 8 min | 219/361 | 14/41 | 34% |
+| 10 min | 273/361 | 16/41 | 39% |
+| **13 min** (done) | **361** | **19/41** | **46%** |
 
 ### `multi` -- 9 interleaved spirals
 
@@ -134,30 +174,29 @@ Each spiral uses step=25 (the global `SCAN_STEP`). The spirals are interleaved b
 
 - **Default rings**: 4
 - **Positions per center**: 1 + 8 + 16 + 24 + 32 = 81
-- **Total before dedup**: 9 x 81 = 729
-- **Total after dedup**: ~650 (overlapping positions near shared boundaries removed)
+- **Total**: 9 x 81 = 729 positions
 - **Coverage per center**: center +/- (step x rings + 17) = +/- 117 tiles
 - **Coverage zones**: 33-267, 395-629, 757-991 on each axis
 - **Gaps**: ~128 tiles between zones (no detection in these bands)
-- **Estimated time**: ~24 min
-- **Hit rate on example data**: 22/41 = **54%**
+- **Detection rate on example data**: 22/41 = **53%**
 
-The interleaving means all 9 zones get a first probe (ring 0) in the first 9 steps (~20 seconds), before any zone gets a second ring. This maximizes early coverage breadth.
+No gaps within each zone (step=25 < viewport=34), but the 128-tile inter-zone gaps miss exchanges in those bands. The interleaving means all 9 zones get a first probe (ring 0) in the first 9 steps (~20 seconds).
 
-### `wide` (default) -- single large spiral
+| Time | Positions | Exchanges detectable | % |
+|------|-----------|---------------------|---|
+| 0s | 0/729 | 0/41 | 0% |
+| 20s | 10/729 | 1/41 | 2% |
+| 1 min | 28/729 | 1/41 | 2% |
+| 2 min | 55/729 | 2/41 | 4% |
+| 5 min | 137/729 | 7/41 | 17% |
+| 8 min | 219/729 | 10/41 | 24% |
+| 10 min | 273/729 | 10/41 | 24% |
+| 15 min | 410/729 | 15/41 | 36% |
+| 20 min | 546/729 | 18/41 | 43% |
+| 25 min | 682/729 | 21/41 | 51% |
+| **27 min** (done) | **729** | **22/41** | **53%** |
 
-A single spiral centered at (512, 512) with step=50 (double the normal step). The large step allows many more rings before hitting the map boundary.
-
-- **Default rings**: 9
-- **Coverage**: center +/- (50 x 9) = +/- 450 tiles -> range 62-962
-- **Positions**: 1 + 8 + 16 + ... + 72 = 325 (before clamp dedup)
-- **Gaps within coverage**: step (50) minus viewport width (34) = 16 tile gaps between adjacent positions. Buildings in these gaps are not detected.
-- **Estimated time**: ~8 min
-- **Hit rate on example data**: 39/41 = **95%** (misses (40,458) and (505,43) which are just outside the 62-962 range)
-
-Good for a fast first pass. The 16-tile detection gaps mean some exchanges will be missed even within the covered area, but the wide reach compensates.
-
-### `grid` -- full map sweep
+### `grid` (default) -- full map sweep
 
 Visits every point on a regular grid from (30,30) to (960,960) with step=30.
 
@@ -165,11 +204,25 @@ Visits every point on a regular grid from (30,30) to (960,960) with step=30.
 - **Positions per axis**: (960 - 30) / 30 + 1 = 32
 - **Total positions**: 32 x 32 = 1024
 - **Coverage**: 30-960 on both axes (with viewport: 13-977)
-- **Gaps**: none meaningful (step=30 < viewport width=34, so positions overlap)
-- **Estimated time**: ~37 min
-- **Hit rate on example data**: 41/41 = **100%**
+- **Gaps**: none (step=30 < viewport width=34, so positions overlap)
+- **Detection rate on example data**: 41/41 = **100%**
 
-The thorough option. Scans row by row, left to right, top to bottom. No gaps, but takes the longest.
+The thorough option. Scans row by row, left to right, top to bottom.
+
+| Time | Positions | Exchanges detectable | % |
+|------|-----------|---------------------|---|
+| 0s | 0/1024 | 0/41 | 0% |
+| 20s | 10/1024 | 0/41 | 0% |
+| 1 min | 28/1024 | 1/41 | 2% |
+| 2 min | 55/1024 | 1/41 | 2% |
+| 5 min | 137/1024 | 4/41 | 9% |
+| 8 min | 219/1024 | 8/41 | 19% |
+| 10 min | 273/1024 | 12/41 | 29% |
+| 15 min | 410/1024 | 15/41 | 36% |
+| 20 min | 546/1024 | 18/41 | 43% |
+| 25 min | 682/1024 | 22/41 | 53% |
+| 30 min | 819/1024 | 29/41 | 70% |
+| **38 min** (done) | **1024** | **41/41** | **100%** |
 
 ### `single` -- small spiral
 
@@ -178,10 +231,16 @@ A single spiral centered at (512, 512) with step=25.
 - **Default rings**: 4
 - **Coverage**: 512 +/- 117 = 395-629
 - **Positions**: 81
-- **Estimated time**: ~3 min
-- **Hit rate on example data**: 0/41 = **0%** (no exchanges spawn this close to center)
+- **Detection rate on example data**: 0/41 = **0%** (no exchanges spawn this close to center)
 
 Only useful for development/testing or if an exchange is known to be near center.
+
+| Time | Positions | Exchanges detectable | % |
+|------|-----------|---------------------|---|
+| 0s | 0/81 | 0/41 | 0% |
+| 1 min | 28/81 | 0/41 | 0% |
+| 2 min | 55/81 | 0/41 | 0% |
+| **3 min** (done) | **81** | **0/41** | **0%** |
 
 ## Exchange logging
 

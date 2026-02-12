@@ -25,7 +25,7 @@ pub struct Config {
     pub debug_screenshots: bool,
     /// Fly-animation wait after navigate_to_coords, in milliseconds (default 2000)
     pub navigate_delay_ms: u64,
-    /// Scan pattern: "single", "multi", "wide", "grid" (default "wide")
+    /// Scan pattern: "single", "multi", "wide", "grid" (default "grid")
     pub scan_pattern: String,
     /// Override ring count per pattern (None = use pattern default)
     pub scan_rings: Option<u32>,
@@ -76,7 +76,7 @@ impl Config {
             .unwrap_or(750);
 
         let scan_pattern =
-            std::env::var("MERCY_SCAN_PATTERN").unwrap_or_else(|_| "wide".into());
+            std::env::var("MERCY_SCAN_PATTERN").unwrap_or_else(|_| "grid".into());
 
         let scan_rings = std::env::var("MERCY_SCAN_RINGS")
             .ok()
