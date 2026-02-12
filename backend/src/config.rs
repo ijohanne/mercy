@@ -33,6 +33,8 @@ pub struct Config {
     pub exchange_log: String,
     /// Path to known locations CSV file (k,x,y format) for "known" scan pattern
     pub known_locations_file: Option<String>,
+    /// Max concurrent detection tasks (default 4)
+    pub max_detect_tasks: usize,
 }
 
 impl Config {
@@ -89,6 +91,11 @@ impl Config {
 
         let known_locations_file = std::env::var("MERCY_KNOWN_LOCATIONS").ok();
 
+        let max_detect_tasks = std::env::var("MERCY_MAX_DETECT_TASKS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(4);
+
         Ok(Config {
             kingdoms,
             auth_token,
@@ -104,6 +111,7 @@ impl Config {
             scan_rings,
             exchange_log,
             known_locations_file,
+            max_detect_tasks,
         })
     }
 }

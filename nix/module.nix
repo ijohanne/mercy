@@ -112,6 +112,12 @@ in
       description = "Path to known locations CSV file (k,x,y format) for 'known' scan pattern";
     };
 
+    maxDetectTasks = lib.mkOption {
+      type = lib.types.int;
+      default = 4;
+      description = "Max concurrent template-matching detection tasks";
+    };
+
     exchangeLog = lib.mkOption {
       type = lib.types.str;
       default = "exchanges.jsonl";
@@ -163,6 +169,7 @@ in
         MERCY_NAVIGATE_DELAY_MS = toString cfg.navigateDelayMs;
         MERCY_SCAN_PATTERN = cfg.scanPattern;
         MERCY_EXCHANGE_LOG = cfg.exchangeLog;
+        MERCY_MAX_DETECT_TASKS = toString cfg.maxDetectTasks;
       } // lib.optionalAttrs (cfg.scanRings != null) {
         MERCY_SCAN_RINGS = toString cfg.scanRings;
       } // lib.optionalAttrs (cfg.knownLocationsFile != null) {

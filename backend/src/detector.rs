@@ -161,10 +161,9 @@ pub fn find_matches(
     Ok(deduped)
 }
 
-/// Run template matching on 4 channels (R, G, B, Edge) and take the minimum
-/// score at each position. This ensures ALL channels must match well —
-/// a structurally similar but differently colored building will fail,
-/// and a color-similar but structurally different building will also fail.
+/// Run template matching on 4 channels (R, G, B, Edge) with cascading early exit.
+/// Runs channels sequentially; if no pixel exceeds the threshold after a channel,
+/// skips remaining channels (~4x speedup for the common "no match" case).
 fn find_template_matches_rgbe(
     screenshot_channels: &[GrayImage; 3],
     screenshot_edge: &GrayImage,
@@ -173,61 +172,115 @@ fn find_template_matches_rgbe(
     template_w: u32,
     template_h: u32,
 ) -> Result<Vec<TemplateMatch>> {
-    // Run matching on R, G, B channels
-    let mut results: Vec<_> = (0..3)
-        .map(|ch| {
-            match_template(
-                &screenshot_channels[ch],
-                &template_channels[ch],
-                MatchTemplateMethod::CrossCorrelationNormalized,
-            )
-        })
-        .collect();
+    let channel_names = ["R", "G", "B", "Edge"];
 
-    // Run matching on edge channel
-    results.push(match_template(
-        screenshot_edge,
-        template_edge,
+    // Channel 0: R — collect all candidates above threshold
+    let r_result = match_template(
+        &screenshot_channels[0],
+        &template_channels[0],
         MatchTemplateMethod::CrossCorrelationNormalized,
-    ));
+    );
+    let (w, h) = r_result.dimensions();
 
-    let (w, h) = results[0].dimensions();
-
-    let mut matches = Vec::new();
+    let mut candidates: Vec<(u32, u32, f32)> = Vec::new();
     let mut best_score: f32 = 0.0;
-
     for y in 0..h {
         for x in 0..w {
-            // Minimum across all 4 channels: ALL must match
-            let score = (0..4)
-                .map(|ch| results[ch].get_pixel(x, y).0[0])
-                .fold(f32::INFINITY, f32::min);
-
+            let score = r_result.get_pixel(x, y).0[0];
             if score > best_score {
                 best_score = score;
             }
             if score >= MATCH_THRESHOLD {
-                matches.push(TemplateMatch {
-                    x: x + template_w / 2,
-                    y: y + template_h / 2,
-                    score,
-                });
+                candidates.push((x, y, score));
             }
         }
     }
+
+    if candidates.is_empty() {
+        tracing::info!(
+            "template {}x{}: early-exit after R (best={:.4}, 0 candidates)",
+            template_w, template_h, best_score
+        );
+        return Ok(Vec::new());
+    }
+
+    tracing::info!(
+        "template {}x{}: R pass: {} candidates (best={:.4})",
+        template_w, template_h, candidates.len(), best_score
+    );
+
+    // Channels 1-3: G, B, Edge — filter candidates, early-exit if none survive
+    let channel_sources: [(Option<usize>, bool); 3] = [
+        (Some(1), false), // G channel
+        (Some(2), false), // B channel
+        (None, true),     // Edge channel
+    ];
+
+    for (ch_idx, &(rgb_idx, is_edge)) in channel_sources.iter().enumerate() {
+        let result = if is_edge {
+            match_template(
+                screenshot_edge,
+                template_edge,
+                MatchTemplateMethod::CrossCorrelationNormalized,
+            )
+        } else {
+            let i = rgb_idx.unwrap();
+            match_template(
+                &screenshot_channels[i],
+                &template_channels[i],
+                MatchTemplateMethod::CrossCorrelationNormalized,
+            )
+        };
+
+        best_score = 0.0;
+        for cand in &mut candidates {
+            let ch_score = result.get_pixel(cand.0, cand.1).0[0];
+            cand.2 = cand.2.min(ch_score); // min across all channels so far
+            if cand.2 > best_score {
+                best_score = cand.2;
+            }
+        }
+
+        candidates.retain(|c| c.2 >= MATCH_THRESHOLD);
+
+        let ch_name = channel_names[ch_idx + 1];
+        if candidates.is_empty() {
+            tracing::info!(
+                "template {}x{}: early-exit after {} (best={:.4}, 0 candidates)",
+                template_w, template_h, ch_name, best_score
+            );
+            return Ok(Vec::new());
+        }
+
+        tracing::info!(
+            "template {}x{}: {} pass: {} candidates (best={:.4})",
+            template_w, template_h, ch_name, candidates.len(), best_score
+        );
+    }
+
+    let mut matches: Vec<TemplateMatch> = candidates
+        .into_iter()
+        .map(|(x, y, score)| TemplateMatch {
+            x: x + template_w / 2,
+            y: y + template_h / 2,
+            score,
+        })
+        .collect();
 
     tracing::info!(
         "template {}x{}: best_score={:.4}, {} raw matches above {:.2} (RGBE 4-channel)",
         template_w, template_h, best_score, matches.len(), MATCH_THRESHOLD
     );
 
-    // Sort by score descending
     matches.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
 
     Ok(matches)
 }
 
 /// Find the single best match regardless of threshold (for calibration).
+/// Uses cascading channels: runs R first, tracks best position, then refines
+/// with G/B/Edge. Skips remaining channels if best R score < threshold
+/// (but still returns the best R-only score for diagnostic output).
 pub fn find_best_match(
     screenshot: &DynamicImage,
     ref_images: &[PreparedRef],
@@ -256,30 +309,68 @@ pub fn find_best_match(
             continue;
         }
 
-        // Run matching on R, G, B channels
-        let mut results: Vec<_> = (0..3)
-            .map(|ch| {
-                match_template(
-                    &screenshot_channels[ch],
-                    &prepared.channels[ch],
-                    MatchTemplateMethod::CrossCorrelationNormalized,
-                )
-            })
-            .collect();
+        // Channel 0: R — find best position
+        let r_result = match_template(
+            &screenshot_channels[0],
+            &prepared.channels[0],
+            MatchTemplateMethod::CrossCorrelationNormalized,
+        );
+        let (w, h) = r_result.dimensions();
 
-        // Run matching on edge channel
-        results.push(match_template(
+        let mut best_r_x = 0u32;
+        let mut best_r_y = 0u32;
+        let mut best_r_score: f32 = f32::NEG_INFINITY;
+        for y in 0..h {
+            for x in 0..w {
+                let score = r_result.get_pixel(x, y).0[0];
+                if score > best_r_score {
+                    best_r_score = score;
+                    best_r_x = x;
+                    best_r_y = y;
+                }
+            }
+        }
+
+        if best_r_score < MATCH_THRESHOLD {
+            // No point running more channels; return R-only score for diagnostics
+            tracing::info!(
+                "find_best_match: early-exit after R (best={:.4})",
+                best_r_score
+            );
+            let dominated = best.as_ref().is_some_and(|b| best_r_score <= b.score);
+            if !dominated {
+                best = Some(TemplateMatch {
+                    x: (best_r_x + prepared.width / 2) * SCALE_DOWN + VIEWPORT_LEFT,
+                    y: (best_r_y + prepared.height / 2) * SCALE_DOWN + VIEWPORT_TOP,
+                    score: best_r_score,
+                });
+            }
+            continue;
+        }
+
+        // Remaining channels: G, B, Edge — full scan, min across all
+        let g_result = match_template(
+            &screenshot_channels[1],
+            &prepared.channels[1],
+            MatchTemplateMethod::CrossCorrelationNormalized,
+        );
+        let b_result = match_template(
+            &screenshot_channels[2],
+            &prepared.channels[2],
+            MatchTemplateMethod::CrossCorrelationNormalized,
+        );
+        let e_result = match_template(
             &screenshot_edge,
             &prepared.edge,
             MatchTemplateMethod::CrossCorrelationNormalized,
-        ));
+        );
 
-        let (w, h) = results[0].dimensions();
         for y in 0..h {
             for x in 0..w {
-                let score = (0..4)
-                    .map(|ch| results[ch].get_pixel(x, y).0[0])
-                    .fold(f32::INFINITY, f32::min);
+                let score = r_result.get_pixel(x, y).0[0]
+                    .min(g_result.get_pixel(x, y).0[0])
+                    .min(b_result.get_pixel(x, y).0[0])
+                    .min(e_result.get_pixel(x, y).0[0]);
 
                 let dominated = best.as_ref().is_some_and(|b| score <= b.score);
                 if !dominated {

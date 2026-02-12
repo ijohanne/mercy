@@ -289,6 +289,8 @@ async fn scan_kingdom(
 
     let scan_start = Instant::now();
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<DetectionResult>();
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(config.max_detect_tasks));
+    tracing::info!("max concurrent detections: {}", config.max_detect_tasks);
 
     for (i, &(gx, gy)) in positions.iter().enumerate() {
         // Check for detection result from previous step (non-blocking)
@@ -321,6 +323,9 @@ async fn scan_kingdom(
             return Ok(());
         }
 
+        // Dismiss store popup that may have appeared while idle
+        game.send_canvas_escape().await;
+
         tracing::info!("step {}/{}: goto ({gx}, {gy})", i + 1, total);
         game.navigate_to_coords(kingdom, gx, gy).await?;
 
@@ -337,10 +342,16 @@ async fn scan_kingdom(
             }
         }
 
+        // Acquire semaphore permit — blocks scan loop if too many detections queued
+        let permit = semaphore.clone().acquire_owned().await
+            .expect("semaphore closed unexpectedly");
+
         // Spawn detection in background (CPU-bound work overlaps with next navigation)
         let refs = ref_images.clone();
         let tx = tx.clone();
         tokio::task::spawn_blocking(move || {
+            let _permit = permit; // held until closure exits
+
             let screenshot = match image::load_from_memory(&screenshot_bytes) {
                 Ok(img) => img,
                 Err(e) => {
