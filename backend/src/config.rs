@@ -31,6 +31,8 @@ pub struct Config {
     pub scan_rings: Option<u32>,
     /// Path to exchange JSONL log file (default "exchanges.jsonl")
     pub exchange_log: String,
+    /// Path to known locations CSV file (k,x,y format) for "known" scan pattern
+    pub known_locations_file: Option<String>,
 }
 
 impl Config {
@@ -85,6 +87,8 @@ impl Config {
         let exchange_log =
             std::env::var("MERCY_EXCHANGE_LOG").unwrap_or_else(|_| "exchanges.jsonl".into());
 
+        let known_locations_file = std::env::var("MERCY_KNOWN_LOCATIONS").ok();
+
         Ok(Config {
             kingdoms,
             auth_token,
@@ -99,6 +103,7 @@ impl Config {
             scan_pattern,
             scan_rings,
             exchange_log,
+            known_locations_file,
         })
     }
 }

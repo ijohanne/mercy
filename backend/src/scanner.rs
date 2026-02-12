@@ -278,6 +278,7 @@ async fn scan_kingdom(
         "multi" => multi_spiral_positions(SCAN_STEP, config.scan_rings.unwrap_or(4)),
         "wide" => wide_spiral_positions(config.scan_rings.unwrap_or(9)),
         "grid" => grid_scan_positions(),
+        "known" => known_spiral_positions(config.known_locations_file.as_deref(), SCAN_STEP, config.scan_rings.unwrap_or(1)),
         _ => grid_scan_positions(),
     };
     let total = positions.len();
@@ -709,6 +710,104 @@ fn wide_spiral_positions(max_rings: u32) -> Vec<(u32, u32)> {
     spiral_scan_positions(512, 512, 50, max_rings)
 }
 
+/// Read known exchange locations from a CSV file (k,x,y per line) and generate
+/// interleaved spirals around each. Falls back to grid_scan_positions if the
+/// file is missing or empty.
+fn known_spiral_positions(
+    file_path: Option<&str>,
+    step: u32,
+    max_rings: u32,
+) -> Vec<(u32, u32)> {
+    let centers = match file_path {
+        Some(path) => match std::fs::read_to_string(path) {
+            Ok(contents) => parse_known_locations(&contents),
+            Err(e) => {
+                tracing::warn!("failed to read known locations file {path}: {e}, falling back to grid");
+                return grid_scan_positions();
+            }
+        },
+        None => {
+            tracing::warn!("no known locations file configured, falling back to grid");
+            return grid_scan_positions();
+        }
+    };
+
+    if centers.is_empty() {
+        tracing::warn!("known locations file is empty, falling back to grid");
+        return grid_scan_positions();
+    }
+
+    tracing::info!("loaded {} known locations, generating spirals with {max_rings} ring(s)", centers.len());
+
+    // Generate per-center spiral positions grouped by ring
+    let per_center: Vec<Vec<Vec<(u32, u32)>>> = centers
+        .iter()
+        .map(|&(cx, cy)| {
+            let mut rings = Vec::new();
+            rings.push(vec![(cx, cy)]);
+            for r in 1..=max_rings {
+                rings.push(spiral_ring_positions(cx, cy, step, r));
+            }
+            rings
+        })
+        .collect();
+
+    let mut seen = HashSet::new();
+    let mut positions = Vec::new();
+
+    // Interleave by ring level: all centers' ring 0, then ring 1, etc.
+    for ring in 0..=max_rings as usize {
+        for center_rings in &per_center {
+            if ring < center_rings.len() {
+                for &pos in &center_rings[ring] {
+                    if seen.insert(pos) {
+                        positions.push(pos);
+                    }
+                }
+            }
+        }
+    }
+
+    positions
+}
+
+/// Parse known locations from CSV content (k,x,y per line).
+/// The kingdom column is stored but currently ignored — all locations are visited.
+/// Deduplicates on (x,y) preserving file order.
+fn parse_known_locations(contents: &str) -> Vec<(u32, u32)> {
+    let mut seen = HashSet::new();
+    let mut centers = Vec::new();
+
+    for line in contents.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let parts: Vec<&str> = line.split(',').collect();
+        // k,x,y (3 columns) or legacy x,y (2 columns)
+        let (xi, yi) = match parts.len() {
+            3 => (1, 2),
+            2 => (0, 1),
+            _ => {
+                tracing::warn!("skipping invalid line: {line}");
+                continue;
+            }
+        };
+        let (x, y) = match (parts[xi].trim().parse::<u32>(), parts[yi].trim().parse::<u32>()) {
+            (Ok(x), Ok(y)) => (x, y),
+            _ => {
+                tracing::warn!("skipping invalid line: {line}");
+                continue;
+            }
+        };
+        if seen.insert((x, y)) {
+            centers.push((x, y));
+        }
+    }
+
+    centers
+}
+
 /// Regular grid across the full map (30–970, step=30).
 fn grid_scan_positions() -> Vec<(u32, u32)> {
     let step = 30u32;
@@ -956,5 +1055,73 @@ mod tests {
         for w in first_row.windows(2) {
             assert_eq!(w[1] - w[0], 30, "expected uniform step of 30");
         }
+    }
+
+    // --- Known spiral tests ---
+
+    #[test]
+    fn test_known_spiral_with_locations() {
+        let dir = std::env::temp_dir();
+        let path = dir.join("mercy_test_known.csv");
+        std::fs::write(&path, "111,100,200\n112,800,900\n111,100,200\n").unwrap();
+
+        let positions = known_spiral_positions(path.to_str(), 25, 1);
+
+        // First two positions should be the two unique centers (ring 0 interleaved)
+        assert_eq!(positions[0], (100, 200));
+        assert_eq!(positions[1], (800, 900));
+
+        // No duplicates
+        let mut seen = std::collections::HashSet::new();
+        for &pos in &positions {
+            assert!(seen.insert(pos), "duplicate position: {pos:?}");
+        }
+
+        // 2 centers × (1 + 8) = 18, minus any dedup from overlap
+        assert!(positions.len() >= 10 && positions.len() <= 18,
+            "expected 10-18 positions, got {}", positions.len());
+
+        // All within bounds
+        for &(x, y) in &positions {
+            assert!(x <= 1023, "x={x} out of bounds");
+            assert!(y <= 1023, "y={y} out of bounds");
+        }
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn test_known_spiral_fallback() {
+        let positions = known_spiral_positions(Some("/nonexistent/path/mercy_test.csv"), 25, 1);
+
+        // Should fall back to grid
+        assert_eq!(positions.len(), grid_scan_positions().len());
+    }
+
+    #[test]
+    fn test_known_spiral_none_fallback() {
+        let positions = known_spiral_positions(None, 25, 1);
+        assert_eq!(positions.len(), grid_scan_positions().len());
+    }
+
+    #[test]
+    fn test_parse_known_locations_kxy() {
+        let contents = "111,100,200\n112,800,900\n111,100,200\n";
+        let locs = parse_known_locations(contents);
+        assert_eq!(locs, vec![(100, 200), (800, 900)]);
+    }
+
+    #[test]
+    fn test_parse_known_locations_legacy_xy() {
+        let contents = "100,200\n800,900\n";
+        let locs = parse_known_locations(contents);
+        assert_eq!(locs, vec![(100, 200), (800, 900)]);
+    }
+
+    #[test]
+    fn test_parse_known_locations_comments_and_blanks() {
+        let contents = "# header\n\n111,100,200\n  \n112,800,900\n";
+        let locs = parse_known_locations(contents);
+        assert_eq!(locs, vec![(100, 200), (800, 900)]);
     }
 }

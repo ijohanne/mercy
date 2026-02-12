@@ -97,13 +97,19 @@ in
     scanPattern = lib.mkOption {
       type = lib.types.str;
       default = "grid";
-      description = "Scan pattern: single, multi, wide, grid";
+      description = "Scan pattern: single, multi, wide, grid, known";
     };
 
     scanRings = lib.mkOption {
       type = lib.types.nullOr lib.types.int;
       default = null;
       description = "Override ring count per scan pattern (null = use pattern default)";
+    };
+
+    knownLocationsFile = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      description = "Path to known locations CSV file (k,x,y format) for 'known' scan pattern";
     };
 
     exchangeLog = lib.mkOption {
@@ -149,6 +155,8 @@ in
         MERCY_EXCHANGE_LOG = cfg.exchangeLog;
       } // lib.optionalAttrs (cfg.scanRings != null) {
         MERCY_SCAN_RINGS = toString cfg.scanRings;
+      } // lib.optionalAttrs (cfg.knownLocationsFile != null) {
+        MERCY_KNOWN_LOCATIONS = cfg.knownLocationsFile;
       };
 
       serviceConfig = {

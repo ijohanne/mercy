@@ -6,11 +6,13 @@ How the scanner navigates the game map and finds exchanges.
 - [Exchange spawn distribution](#exchange-spawn-distribution)
 - [Viewport geometry](#viewport-geometry)
 - [Scan patterns](#scan-patterns)
+  - [`known` -- known locations + discovery](#known----known-locations--discovery)
   - [`wide` -- single large spiral](#wide----single-large-spiral)
   - [`multi` -- 9 interleaved spirals](#multi----9-interleaved-spirals)
   - [`grid` -- full map sweep](#grid-default----full-map-sweep)
   - [`single` -- small spiral](#single----small-spiral)
 - [Exchange logging](#exchange-logging)
+- [Future investigation](#future-investigation)
 
 ## Coordinate system
 
@@ -128,14 +130,46 @@ All time estimates assume ~2.2 seconds per position (750ms navigate delay + scre
 
 | Pattern | Finds | Avg | Median | Min | Max |
 |---------|-------|-----|--------|-----|-----|
+| `known` | **41/41** | **1.5 min** | 1.5 min | 0.04 min | 2.9 min |
 | `wide` | 19/41 | 7.3 min | 6.9 min | 3.0 min | 12.1 min |
 | `multi` | 22/41 | 11.6 min | 10.9 min | 0.2 min | 26.4 min |
 | `grid` | **41/41** | 20.2 min | 22.3 min | 0.6 min | 35.6 min |
 | `single` | 0/41 | -- | -- | -- | -- |
 
-`wide` and `multi` are faster when they find something, but their deterministic positions leave permanent blind spots -- no number of repeated passes will detect exchanges in those gaps. `grid` guarantees detection within a single pass.
+`known` is 13x faster than `grid` for finding known exchange locations. After checking all known locations (~1.5 min), the remaining spiral positions probe ~23% of the map for new spawns.
+
+`wide` and `multi` are faster when they find something, but their deterministic positions leave permanent blind spots -- no number of repeated passes will detect exchanges in those gaps. `grid` guarantees detection within a single pass but takes ~38 min.
 
 > **Note:** These statistics are based on only 41 unique sample points. More data from `exchanges.jsonl` will improve confidence in these numbers and may shift the optimal default. Re-run this analysis as the dataset grows.
+
+### `known` -- known locations + discovery
+
+Visits all previously observed exchange locations first (with 1-ring spirals around each), then continues probing nearby areas. Requires a known locations file set via `MERCY_KNOWN_LOCATIONS`.
+
+**File format:** CSV with `k,x,y` per line (kingdom, x, y). The kingdom column is stored but currently ignored — all locations are visited regardless of which kingdom is being scanned. Lines starting with `#` are comments. Duplicate (x,y) pairs are deduplicated preserving file order.
+
+- **Default rings**: 1
+- **Positions**: 41 centers × 9 (1 + 8 ring-1) = 369 (before dedup, with 41 unique locations from example data)
+- **Coverage per center**: center ± (25 + 17) = ± 42 tiles
+- **Known location detection**: 41/41 = **100%** (by definition — visits each known location directly)
+- **Discovery area**: ~23% of map probed by ring-1 positions around each center
+- **Fallback**: if file is missing or empty, falls back to `grid`
+
+The interleaving visits all centers first (ring 0), then ring 1 of all centers. This means all 41 known locations are checked in the first ~90 seconds before any discovery probing begins.
+
+| Time | Positions | Known exchanges found | New area probed |
+|------|-----------|----------------------|-----------------|
+| 0s | 0/369 | 0/41 | 0% |
+| 20s | 10/369 | 10/41 | 0% |
+| 1 min | 28/369 | 28/41 | 0% |
+| **1.5 min** | **41/369** | **41/41** | **0%** |
+| 3 min | 82/369 | 41/41 | ~5% |
+| 5 min | 137/369 | 41/41 | ~12% |
+| 8 min | 219/369 | 41/41 | ~18% |
+| 10 min | 273/369 | 41/41 | ~20% |
+| **13.5 min** (done) | **369** | **41/41** | **~23%** |
+
+With more rings (`MERCY_SCAN_RINGS=2`), discovery area increases but scan time roughly triples. With the default 1 ring, the known pattern completes in ~13.5 min total, leaving time for a full rescan within the cooldown window.
 
 ### `wide` -- single large spiral
 
@@ -265,3 +299,14 @@ All `confirm_match` outcomes (confirmed, estimate, and rejected) are appended as
 - `stored`: exchange was added to state (false if duplicate)
 - `initial_score`: template match score from the scan screenshot
 - `calibration_score`: template match score from the goto screenshot (null if no match)
+
+## Future investigation
+
+Areas to explore as `exchanges.jsonl` accumulates more data:
+
+- **Coordinate reuse across respawns**: Do exchanges reuse the same coordinates when they respawn, or does each respawn pick a new random location? If coordinates are reused, the known locations file becomes increasingly complete over time.
+- **Donut distribution validation**: The current 41-point sample shows a clear donut pattern (no spawns within 300 tiles of center). Does this hold with more data, or are there rare center spawns?
+- **Optimal ring count**: Is 1 ring the right default, or should it scale with data confidence? More rings increase discovery area but slow down known-location checking.
+- **Frequency-weighted ordering**: Can ordering known locations by observation frequency (most-seen first) improve average detection time? Locations seen more often may be more likely to have an active exchange.
+- **Kingdom overlap**: Do different kingdoms share the same spawn point pool, or does each kingdom have its own set? The `k` column in the locations file exists to enable per-kingdom filtering once enough data is collected.
+- **Per-kingdom filtering**: If spawn points are kingdom-specific, filter the known locations file by the kingdom being scanned to reduce the number of positions visited. This would further reduce detection time proportional to the number of kingdoms tracked.
