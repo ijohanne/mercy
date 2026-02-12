@@ -16,13 +16,17 @@
   outputs = { self, nixpkgs, flake-utils, rust-overlay, bun2nix }:
     flake-utils.lib.eachDefaultSystem (system:
       let
-        overlays = [ (import rust-overlay) ];
+        overlays = [ rust-overlay.overlays.default ];
         pkgs = import nixpkgs { inherit system overlays; };
         rustToolchain = pkgs.rust-bin.stable.latest.default;
+        rustPlatform = pkgs.makeRustPlatform {
+          cargo = rustToolchain;
+          rustc = rustToolchain;
+        };
         bun2nixPkg = bun2nix.packages.${system}.default;
       in {
         packages = {
-          mercy-backend = pkgs.rustPlatform.buildRustPackage {
+          mercy-backend = rustPlatform.buildRustPackage {
             pname = "mercy";
             version = "0.1.0";
             src = ./backend;
