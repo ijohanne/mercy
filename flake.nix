@@ -11,9 +11,12 @@
     bun2nix = {
       url = "github:nix-community/bun2nix";
     };
+    git-hooks = {
+      url = "github:cachix/git-hooks.nix";
+    };
   };
 
-  outputs = { self, nixpkgs, flake-utils, rust-overlay, bun2nix }:
+  outputs = { self, nixpkgs, flake-utils, rust-overlay, bun2nix, git-hooks }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         overlays = [ rust-overlay.overlays.default ];
@@ -24,6 +27,89 @@
           rustc = rustToolchain;
         };
         bun2nixPkg = bun2nix.packages.${system}.default;
+
+        pre-commit-check = git-hooks.lib.${system}.run {
+          src = ./.;
+          hooks = {
+            # === General checks ===
+            check-merge-conflicts.enable = true;
+            check-added-large-files = {
+              enable = true;
+              stages = [ "pre-commit" ];
+            };
+            detect-private-keys.enable = true;
+
+            # === File format validation ===
+            check-json.enable = true;
+            check-yaml.enable = true;
+            check-toml.enable = true;
+
+            # === Spelling ===
+            typos = {
+              enable = true;
+              excludes = [
+                "^frontend/bun\\.nix$"
+                "^frontend/bun\\.lock$"
+                "^docs/.*$"
+              ];
+              settings = {
+                ignored-words = [
+                  "ser"
+                  "idents"
+                ];
+              };
+            };
+
+            # === Nix ===
+            nixfmt.enable = true;
+            deadnix.enable = true;
+            statix.enable = true;
+
+            # === Rust ===
+            rustfmt = {
+              enable = true;
+              name = "rustfmt";
+              entry = "bash -c 'cd backend && cargo fmt --check'";
+              files = "^backend/.*\\.rs$";
+              pass_filenames = false;
+              language = "system";
+            };
+
+            clippy = {
+              enable = true;
+              name = "clippy";
+              entry = "bash -c 'cd backend && cargo clippy -- -D warnings'";
+              files = "^backend/.*\\.rs$";
+              pass_filenames = false;
+              language = "system";
+            };
+
+            # === Frontend bun.nix sync check ===
+            frontend-bun-nix-check = {
+              enable = true;
+              name = "frontend-bun-nix-check";
+              entry = toString (
+                pkgs.writeShellScript "frontend-bun-nix-check" ''
+                  set -e
+                  cd frontend
+
+                  ${pkgs.bun}/bin/bunx bun2nix -o bun.nix 2>/dev/null
+
+                  if ! git diff --exit-code --quiet bun.nix 2>/dev/null; then
+                    echo "ERROR: frontend/bun.nix is out of date!"
+                    echo ""
+                    echo "Run: cd frontend && bunx bun2nix -o bun.nix"
+                    echo "Then stage the updated bun.nix."
+                    exit 1
+                  fi
+                ''
+              );
+              files = "^frontend/bun\\.lock$";
+              pass_filenames = false;
+              language = "system";
+            };
+          };
+        };
       in {
         packages = {
           mercy-backend = rustPlatform.buildRustPackage {
@@ -84,6 +170,7 @@
         };
 
         devShells.default = pkgs.mkShell {
+          inherit (pre-commit-check) shellHook;
           buildInputs = with pkgs; [
             rustToolchain
             pkg-config
