@@ -278,7 +278,7 @@ async fn scan_kingdom(
         "multi" => multi_spiral_positions(SCAN_STEP, config.scan_rings.unwrap_or(4)),
         "wide" => wide_spiral_positions(config.scan_rings.unwrap_or(9)),
         "grid" => grid_scan_positions(),
-        "known" => known_spiral_positions(config.known_locations_file.as_deref(), SCAN_STEP, config.scan_rings.unwrap_or(1)),
+        "known" => known_positions(kingdom, config.known_coverage),
         _ => grid_scan_positions(),
     };
     let total = positions.len();
@@ -721,102 +721,37 @@ fn wide_spiral_positions(max_rings: u32) -> Vec<(u32, u32)> {
     spiral_scan_positions(512, 512, 50, max_rings)
 }
 
-/// Read known exchange locations from a CSV file (k,x,y per line) and generate
-/// interleaved spirals around each. Falls back to grid_scan_positions if the
-/// file is missing or empty.
-fn known_spiral_positions(
-    file_path: Option<&str>,
-    step: u32,
-    max_rings: u32,
-) -> Vec<(u32, u32)> {
-    let centers = match file_path {
-        Some(path) => match std::fs::read_to_string(path) {
-            Ok(contents) => parse_known_locations(&contents),
-            Err(e) => {
-                tracing::warn!("failed to read known locations file {path}: {e}, falling back to grid");
-                return grid_scan_positions();
-            }
-        },
-        None => {
-            tracing::warn!("no known locations file configured, falling back to grid");
-            return grid_scan_positions();
-        }
-    };
-
-    if centers.is_empty() {
-        tracing::warn!("known locations file is empty, falling back to grid");
+/// Return density-sorted scan positions for a kingdom from the compiled-in
+/// historical spawn data, truncated to the given coverage percentage.
+/// A coverage of 80 means: include positions until 80% of historical spawns
+/// are covered, then stop.  Falls back to grid_scan_positions if the kingdom
+/// has no historical data.
+fn known_positions(kingdom: u32, coverage_pct: u32) -> Vec<(u32, u32)> {
+    let data = crate::known_locations::positions_for_kingdom(kingdom);
+    if data.is_empty() {
+        tracing::warn!("no compiled-in data for kingdom {kingdom}, falling back to grid");
         return grid_scan_positions();
     }
 
-    tracing::info!("loaded {} known locations, generating spirals with {max_rings} ring(s)", centers.len());
+    let total_spawns: u32 = data.iter().map(|&(_, _, c)| c as u32).sum();
+    let target = (total_spawns as f64 * coverage_pct.min(100) as f64 / 100.0).ceil() as u32;
 
-    // Generate per-center spiral positions grouped by ring
-    let per_center: Vec<Vec<Vec<(u32, u32)>>> = centers
-        .iter()
-        .map(|&(cx, cy)| {
-            let mut rings = Vec::new();
-            rings.push(vec![(cx, cy)]);
-            for r in 1..=max_rings {
-                rings.push(spiral_ring_positions(cx, cy, step, r));
-            }
-            rings
-        })
-        .collect();
-
-    let mut seen = HashSet::new();
+    let mut cumulative = 0u32;
     let mut positions = Vec::new();
-
-    // Interleave by ring level: all centers' ring 0, then ring 1, etc.
-    for ring in 0..=max_rings as usize {
-        for center_rings in &per_center {
-            if ring < center_rings.len() {
-                for &pos in &center_rings[ring] {
-                    if seen.insert(pos) {
-                        positions.push(pos);
-                    }
-                }
-            }
+    for &(x, y, count) in data {
+        positions.push((x, y));
+        cumulative += count as u32;
+        if cumulative >= target {
+            break;
         }
     }
 
+    tracing::info!(
+        "kingdom {kingdom}: {}/{} positions at {coverage_pct}% coverage ({cumulative}/{total_spawns} spawns)",
+        positions.len(),
+        data.len(),
+    );
     positions
-}
-
-/// Parse known locations from CSV content (k,x,y per line).
-/// The kingdom column is stored but currently ignored — all locations are visited.
-/// Deduplicates on (x,y) preserving file order.
-fn parse_known_locations(contents: &str) -> Vec<(u32, u32)> {
-    let mut seen = HashSet::new();
-    let mut centers = Vec::new();
-
-    for line in contents.lines() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        let parts: Vec<&str> = line.split(',').collect();
-        // k,x,y (3 columns) or legacy x,y (2 columns)
-        let (xi, yi) = match parts.len() {
-            3 => (1, 2),
-            2 => (0, 1),
-            _ => {
-                tracing::warn!("skipping invalid line: {line}");
-                continue;
-            }
-        };
-        let (x, y) = match (parts[xi].trim().parse::<u32>(), parts[yi].trim().parse::<u32>()) {
-            (Ok(x), Ok(y)) => (x, y),
-            _ => {
-                tracing::warn!("skipping invalid line: {line}");
-                continue;
-            }
-        };
-        if seen.insert((x, y)) {
-            centers.push((x, y));
-        }
-    }
-
-    centers
 }
 
 /// Regular grid across the full map (30–970, step=30).
@@ -1068,71 +1003,65 @@ mod tests {
         }
     }
 
-    // --- Known spiral tests ---
+    // --- Known positions (compiled-in) tests ---
 
     #[test]
-    fn test_known_spiral_with_locations() {
-        let dir = std::env::temp_dir();
-        let path = dir.join("mercy_test_known.csv");
-        std::fs::write(&path, "111,100,200\n112,800,900\n111,100,200\n").unwrap();
+    fn test_known_positions_full_coverage() {
+        let positions = known_positions(10, 100);
+        assert!(!positions.is_empty(), "kingdom 10 should have data");
+        assert!(positions.len() < 1024, "should be fewer positions than full grid");
 
-        let positions = known_spiral_positions(path.to_str(), 25, 1);
-
-        // First two positions should be the two unique centers (ring 0 interleaved)
-        assert_eq!(positions[0], (100, 200));
-        assert_eq!(positions[1], (800, 900));
-
-        // No duplicates
-        let mut seen = std::collections::HashSet::new();
-        for &pos in &positions {
-            assert!(seen.insert(pos), "duplicate position: {pos:?}");
-        }
-
-        // 2 centers × (1 + 8) = 18, minus any dedup from overlap
-        assert!(positions.len() >= 10 && positions.len() <= 18,
-            "expected 10-18 positions, got {}", positions.len());
-
-        // All within bounds
         for &(x, y) in &positions {
             assert!(x <= 1023, "x={x} out of bounds");
             assert!(y <= 1023, "y={y} out of bounds");
         }
 
-        std::fs::remove_file(&path).ok();
+        let mut seen = std::collections::HashSet::new();
+        for &pos in &positions {
+            assert!(seen.insert(pos), "duplicate position: {pos:?}");
+        }
     }
 
     #[test]
-    fn test_known_spiral_fallback() {
-        let positions = known_spiral_positions(Some("/nonexistent/path/mercy_test.csv"), 25, 1);
+    fn test_known_positions_coverage_tiers() {
+        let p100 = known_positions(10, 100);
+        let p90 = known_positions(10, 90);
+        let p80 = known_positions(10, 80);
+        let p70 = known_positions(10, 70);
 
-        // Should fall back to grid
+        assert!(p70.len() < p80.len(), "70% should have fewer positions than 80%");
+        assert!(p80.len() < p90.len(), "80% should have fewer positions than 90%");
+        assert!(p90.len() < p100.len(), "90% should have fewer positions than 100%");
+    }
+
+    #[test]
+    fn test_known_positions_unknown_kingdom_fallback() {
+        let positions = known_positions(99999, 80);
         assert_eq!(positions.len(), grid_scan_positions().len());
     }
 
     #[test]
-    fn test_known_spiral_none_fallback() {
-        let positions = known_spiral_positions(None, 25, 1);
-        assert_eq!(positions.len(), grid_scan_positions().len());
+    fn test_known_positions_density_sorted() {
+        let stats = crate::known_locations::KINGDOM_STATS;
+        assert!(!stats.is_empty(), "should have kingdom stats");
+        for &(k, spawns, positions) in stats {
+            assert!(spawns > 0, "kingdom {k} has 0 spawns");
+            assert!(positions > 0, "kingdom {k} has 0 positions");
+            assert!(positions <= spawns, "kingdom {k} has more positions than spawns");
+        }
     }
 
     #[test]
-    fn test_parse_known_locations_kxy() {
-        let contents = "111,100,200\n112,800,900\n111,100,200\n";
-        let locs = parse_known_locations(contents);
-        assert_eq!(locs, vec![(100, 200), (800, 900)]);
-    }
-
-    #[test]
-    fn test_parse_known_locations_legacy_xy() {
-        let contents = "100,200\n800,900\n";
-        let locs = parse_known_locations(contents);
-        assert_eq!(locs, vec![(100, 200), (800, 900)]);
-    }
-
-    #[test]
-    fn test_parse_known_locations_comments_and_blanks() {
-        let contents = "# header\n\n111,100,200\n  \n112,800,900\n";
-        let locs = parse_known_locations(contents);
-        assert_eq!(locs, vec![(100, 200), (800, 900)]);
+    fn test_known_positions_spawn_counts_descending() {
+        // Verify the compiled-in data is actually sorted by descending spawn count
+        let data = crate::known_locations::positions_for_kingdom(10);
+        assert!(!data.is_empty());
+        for window in data.windows(2) {
+            assert!(
+                window[0].2 >= window[1].2,
+                "spawn counts not descending: {} < {}",
+                window[0].2, window[1].2
+            );
+        }
     }
 }

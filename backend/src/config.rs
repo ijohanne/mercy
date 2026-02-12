@@ -31,8 +31,10 @@ pub struct Config {
     pub scan_rings: Option<u32>,
     /// Path to exchange JSONL log file (default "exchanges.jsonl")
     pub exchange_log: String,
-    /// Path to known locations CSV file (k,x,y format) for "known" scan pattern
-    pub known_locations_file: Option<String>,
+    /// Coverage percentage for "known" scan pattern (1-100, default 80).
+    /// Lower values scan fewer positions (faster) but may miss exchanges
+    /// in historically rare spawn locations.
+    pub known_coverage: u32,
     /// Max concurrent detection tasks (default 4)
     pub max_detect_tasks: usize,
 }
@@ -89,7 +91,11 @@ impl Config {
         let exchange_log =
             std::env::var("MERCY_EXCHANGE_LOG").unwrap_or_else(|_| "exchanges.jsonl".into());
 
-        let known_locations_file = std::env::var("MERCY_KNOWN_LOCATIONS").ok();
+        let known_coverage = std::env::var("MERCY_KNOWN_COVERAGE")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(80u32)
+            .clamp(1, 100);
 
         let max_detect_tasks = std::env::var("MERCY_MAX_DETECT_TASKS")
             .ok()
@@ -110,7 +116,7 @@ impl Config {
             scan_pattern,
             scan_rings,
             exchange_log,
-            known_locations_file,
+            known_coverage,
             max_detect_tasks,
         })
     }

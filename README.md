@@ -51,7 +51,7 @@ mercy/
 | `MERCY_SCAN_PATTERN` | no | Scan pattern: `single`, `multi`, `wide`, `grid`, `known` (default `grid`). See [scanning docs](docs/scanning.md). |
 | `MERCY_SCAN_RINGS` | no | Override ring count per pattern (default: pattern-specific) |
 | `MERCY_EXCHANGE_LOG` | no | Path to exchange detection JSONL log (default `exchanges.jsonl`) |
-| `MERCY_KNOWN_LOCATIONS` | no | Known locations CSV (`k,x,y` format) for `known` scan pattern |
+| `MERCY_KNOWN_COVERAGE` | no | Coverage % for `known` scan pattern: `70`, `80`, `90`, `100` (default `80`). Lower = faster, see [scanning docs](docs/scanning.md). |
 | `MERCY_MAX_DETECT_TASKS` | no | Max concurrent template-matching tasks (default `4`) |
 
 ### Frontend

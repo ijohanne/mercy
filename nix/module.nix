@@ -97,7 +97,7 @@ in
     scanPattern = lib.mkOption {
       type = lib.types.str;
       default = "grid";
-      description = "Scan pattern: single, multi, wide, grid, known";
+      description = "Scan pattern: single, multi, wide, grid, known (known uses compiled-in historical data)";
     };
 
     scanRings = lib.mkOption {
@@ -106,10 +106,10 @@ in
       description = "Override ring count per scan pattern (null = use pattern default)";
     };
 
-    knownLocationsFile = lib.mkOption {
-      type = lib.types.nullOr lib.types.str;
-      default = null;
-      description = "Path to known locations CSV file (k,x,y format) for 'known' scan pattern";
+    knownCoverage = lib.mkOption {
+      type = lib.types.int;
+      default = 80;
+      description = "Coverage percentage for 'known' scan pattern (1-100). Lower = faster but may miss rare spawn locations.";
     };
 
     maxDetectTasks = lib.mkOption {
@@ -169,11 +169,10 @@ in
         MERCY_NAVIGATE_DELAY_MS = toString cfg.navigateDelayMs;
         MERCY_SCAN_PATTERN = cfg.scanPattern;
         MERCY_EXCHANGE_LOG = cfg.exchangeLog;
+        MERCY_KNOWN_COVERAGE = toString cfg.knownCoverage;
         MERCY_MAX_DETECT_TASKS = toString cfg.maxDetectTasks;
       } // lib.optionalAttrs (cfg.scanRings != null) {
         MERCY_SCAN_RINGS = toString cfg.scanRings;
-      } // lib.optionalAttrs (cfg.knownLocationsFile != null) {
-        MERCY_KNOWN_LOCATIONS = cfg.knownLocationsFile;
       };
 
       serviceConfig = {

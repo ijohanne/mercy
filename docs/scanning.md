@@ -70,49 +70,15 @@ If the zoom level changes, re-calibrate using:
 
 ## Exchange spawn distribution
 
-Analysis of 48 observed exchange locations (41 unique) collected from `example-locations.txt`. All coordinates are game tiles within a 1024x1024 kingdom grid.
-
-### Raw data (sorted, deduplicated)
-
-```
-(40,458)   (71,727)   (100,684)  (118,668)  (144,214)  (159,709)
-(185,363)  (201,577)  (202,864)  (217,203)  (229,817)  (236,782)
-(244,822)  (257,867)  (275,233)  (290,928)  (342,98)   (361,903)
-(416,844)  (433,187)  (505,43)   (531,117)  (632,158)  (640,850)
-(667,873)  (685,89)   (709,863)  (758,298)  (816,808)  (831,207)
-(840,652)  (841,689)  (859,427)  (859,877)  (866,578)  (872,294)
-(875,223)  (932,648)  (940,208)  (947,573)  (970,412)
-```
+Analysis of 104,297 historical exchange spawns across 295 kingdoms (75,141 unique coordinate pairs). Data is compiled into the binary at build time from `backend/assets/known_locations.csv`.
 
 ### Key findings
 
-- **X range**: 40 -- 970 (nearly full map width)
-- **Y range**: 43 -- 928 (nearly full map height)
-- **Mean**: X=515, Y=533 (close to center, but the distribution is hollow)
-- **Distance from center (512,512)**: all 41 points are >300 tiles from center
-- **0 points** within 150 tiles of center, **0** within 300 tiles
-
-The playable map extends nearly to the edges. The previous assumption that ocean/unusable terrain starts at ~200 was wrong.
-
-### Distribution by 100-tile bins
-
-```
-X axis:                              Y axis:
-  0-99:   ## (2)                       0-99:   ### (3)
-100-199:  ##### (5)                  100-199:  ### (3)
-200-299:  ######### (9)              200-299:  ######## (8)
-300-399:  ## (2)                     300-399:  # (1)
-400-499:  ## (2)                     400-499:  ### (3)
-500-599:  ## (2)                     500-599:  ### (3)
-600-699:  #### (4)                   600-699:  ##### (5)
-700-799:  ## (2)                     700-799:  ### (3)
-800-899:  ######### (9)              800-899:  ########## (10)
-900-999:  #### (4)                   900-999:  ## (2)
-```
-
-Exchanges cluster near the edges and avoid the 300-600 center band. The 200-299 and 800-899 bins are the most populated on both axes.
-
-> **Note:** 41 unique points is a small sample. As `exchanges.jsonl` accumulates confirmed locations, this analysis should be updated to verify the donut-shaped distribution holds and to check whether any map regions are underrepresented.
+- **295 kingdoms** with historical spawn data
+- **~337 unique locations per kingdom** on average (max 885 in K:10)
+- Spawns cover nearly the full 1024x1024 map, clustering near edges
+- The center band (300-600) has fewer spawns, confirming the donut-shaped distribution seen in earlier small samples
+- Locations are reused across respawns — frequency data enables density-based scan ordering
 
 ## Viewport geometry
 
@@ -124,52 +90,124 @@ This means a scan position at game coordinate (X, Y) can detect buildings within
 
 Set via `MERCY_SCAN_PATTERN` (default: `grid`). Override ring count with `MERCY_SCAN_RINGS`.
 
-All time estimates assume ~2.2 seconds per position (750ms navigate delay + screenshot + detection overlap). Detection rates are computed against 41 example locations using a ±17 tile viewport radius (i.e. whether any scan position actually passes close enough to detect each exchange, not just bounding-box coverage).
+All time estimates assume ~2.2 seconds per position (750ms navigate delay + screenshot + detection overlap).
 
-### Average time to first detection
+### Pattern comparison
 
-| Pattern | Finds | Avg | Median | Min | Max |
-|---------|-------|-----|--------|-----|-----|
-| `known` | **41/41** | **1.5 min** | 1.5 min | 0.04 min | 2.9 min |
-| `wide` | 19/41 | 7.3 min | 6.9 min | 3.0 min | 12.1 min |
-| `multi` | 22/41 | 11.6 min | 10.9 min | 0.2 min | 26.4 min |
-| `grid` | **41/41** | 20.2 min | 22.3 min | 0.6 min | 35.6 min |
-| `single` | 0/41 | -- | -- | -- | -- |
+Benchmarked against all 99,477 unique historical spawn locations across 295 kingdoms. Detection rate = percentage of those locations within ±17 tiles (one viewport) of any scan position.
 
-`known` is 13x faster than `grid` for finding known exchange locations. After checking all known locations (~1.5 min), the remaining spiral positions probe ~23% of the map for new spawns.
+#### Detection rate (will you find it at all?)
 
-`wide` and `multi` are faster when they find something, but their deterministic positions leave permanent blind spots -- no number of repeated passes will detect exchanges in those gaps. `grid` guarantees detection within a single pass but takes ~38 min.
+| Pattern | Positions | Detection rate | Min | Median | Max |
+|---------|----------:|---------------:|----:|-------:|----:|
+| `known@100%` | ~241 | **100.0%** | 100.0% | 100.0% | 100.0% |
+| `grid` | 1024 | 99.6% | 97.8% | 100.0% | 100.0% |
+| `known@90%` | ~206 | 92.8% | 88.5% | 92.7% | 100.0% |
+| `known@80%` | ~171 | 84.5% | 72.2% | 84.3% | 100.0% |
+| `known@70%` | ~136 | 75.3% | 61.1% | 75.2% | 100.0% |
+| `multi` | 729 | 57.4% | 0.0% | 57.1% | 100.0% |
+| `wide` | 361 | 48.8% | 0.0% | 48.6% | 100.0% |
+| `single` | 81 | 0.0% | 0.0% | 0.0% | 3.6% |
 
-> **Note:** These statistics are based on only 41 unique sample points. More data from `exchanges.jsonl` will improve confidence in these numbers and may shift the optimal default. Re-run this analysis as the dataset grows.
+`known@100%` achieves perfect detection in ~241 positions — compared to `grid`'s 1024 positions for 99.6%. Meanwhile `multi` and `wide` use 729 and 361 positions respectively but only find 57% and 49% of exchanges due to blind spots.
 
-### `known` -- known locations + discovery
+#### Time to first detection (how fast do you find it?)
 
-Visits all previously observed exchange locations first (with 1-ring spirals around each), then continues probing nearby areas. Requires a known locations file set via `MERCY_KNOWN_LOCATIONS`.
+| Pattern | Positions | Avg time | Median time | P90 time | Misses |
+|---------|----------:|---------:|------------:|---------:|-------:|
+| `known@70%` | ~136 | **2.3 min** | **1.9 min** | **5.0 min** | 24,602 |
+| `known@80%` | ~171 | 2.8 min | 2.2 min | 6.2 min | 15,417 |
+| `known@90%` | ~206 | 3.3 min | 2.5 min | 7.5 min | 7,175 |
+| `known@100%` | ~241 | 3.7 min | 2.8 min | 8.7 min | 0 |
+| `single` | 81 | 1.5 min | 1.8 min | 2.8 min | 99,428 |
+| `wide` | 361 | 7.6 min | 7.5 min | 11.5 min | 50,950 |
+| `multi` | 729 | 12.2 min | 11.7 min | 24.0 min | 42,363 |
+| `grid` | 1024 | 18.3 min | 17.5 min | 33.3 min | 355 |
 
-**File format:** CSV with `k,x,y` per line (kingdom, x, y). The kingdom column is stored but currently ignored — all locations are visited regardless of which kingdom is being scanned. Lines starting with `#` are comments. Duplicate (x,y) pairs are deduplicated preserving file order.
+`known@70%` finds detectable exchanges in a median of **1.9 minutes** — 9x faster than `grid` (17.5 min median). Even `known@100%` at 2.8 min median is 6x faster than `grid`, because density-sorting checks the most likely spots first.
 
-- **Default rings**: 1
-- **Positions**: 41 centers × 9 (1 + 8 ring-1) = 369 (before dedup, with 41 unique locations from example data)
-- **Coverage per center**: center ± (25 + 17) = ± 42 tiles
-- **Known location detection**: 41/41 = **100%** (by definition — visits each known location directly)
-- **Discovery area**: ~23% of map probed by ring-1 positions around each center
-- **Fallback**: if file is missing or empty, falls back to `grid`
+`wide` and `multi` have no intelligence about where exchanges actually spawn — they scan geometric patterns that happen to miss over half the map. `grid` is thorough but slow. The `known` pattern is both fast and accurate because it targets historical hotspots.
 
-The interleaving visits all centers first (ring 0), then ring 1 of all centers. This means all 41 known locations are checked in the first ~90 seconds before any discovery probing begins.
+**Recommendation**: Use `known` with 70-80% coverage when cycling through many kingdoms (speed over guaranteed detection). Use 90-100% when scanning fewer kingdoms and wanting high confidence.
 
-| Time | Positions | Known exchanges found | New area probed |
-|------|-----------|----------------------|-----------------|
-| 0s | 0/369 | 0/41 | 0% |
-| 20s | 10/369 | 10/41 | 0% |
-| 1 min | 28/369 | 28/41 | 0% |
-| **1.5 min** | **41/369** | **41/41** | **0%** |
-| 3 min | 82/369 | 41/41 | ~5% |
-| 5 min | 137/369 | 41/41 | ~12% |
-| 8 min | 219/369 | 41/41 | ~18% |
-| 10 min | 273/369 | 41/41 | ~20% |
-| **13.5 min** (done) | **369** | **41/41** | **~23%** |
+### `known` -- compiled-in historical hotspots
 
-With more rings (`MERCY_SCAN_RINGS=2`), discovery area increases but scan time roughly triples. With the default 1 ring, the known pattern completes in ~13.5 min total, leaving time for a full rescan within the cooldown window.
+Uses 104,297 historical spawn records compiled into the binary at build time. For each kingdom, locations are clustered into 25x25 game-unit cells (matching the viewport) and sorted by descending spawn frequency — the most historically active areas are scanned first.
+
+- **Data**: 295 kingdoms, ~337 unique locations per kingdom (avg), pre-clustered into ~240-450 scan positions
+- **Ordering**: density-sorted (most frequent spawn cells first)
+- **Per-kingdom**: only locations for the kingdom being scanned are visited
+- **Fallback**: kingdoms without historical data fall back to `grid`
+- **No external files**: data is compiled into the binary from `backend/assets/known_locations.csv`
+
+Since positions are density-sorted, the exchange is most likely found in the first ~100 positions (the historical hotspots), well before the full scan completes.
+
+#### Top 20 kingdoms by data volume
+
+Positions at each coverage tier (100% = all cells, lower = only the densest hotspots):
+
+| Kingdom | Spawns | 70% | 80% | 90% | 100% |
+|--------:|-------:|----:|----:|----:|-----:|
+| 10 | 935 | 203 (7.4m) | 249 (9.1m) | 338 (12.4m) | 431 (15.8m) |
+| 157 | 877 | 216 (7.9m) | 275 (10.1m) | 363 (13.3m) | 450 (16.5m) |
+| 89 | 810 | 228 (8.4m) | 309 (11.3m) | 390 (14.3m) | 471 (17.3m) |
+| 158 | 787 | 212 (7.8m) | 291 (10.7m) | 370 (13.6m) | 448 (16.4m) |
+| 28 | 785 | 203 (7.4m) | 274 (10.0m) | 353 (12.9m) | 431 (15.8m) |
+| 59 | 770 | 211 (7.7m) | 288 (10.6m) | 365 (13.4m) | 442 (16.2m) |
+| 44 | 766 | 181 (6.6m) | 230 (8.4m) | 307 (11.3m) | 383 (14.0m) |
+| 155 | 748 | 209 (7.7m) | 284 (10.4m) | 359 (13.2m) | 433 (15.9m) |
+| 75 | 739 | 185 (6.8m) | 255 (9.3m) | 329 (12.1m) | 402 (14.7m) |
+| 147 | 700 | 189 (6.9m) | 249 (9.1m) | 319 (11.7m) | 389 (14.3m) |
+| 173 | 694 | 187 (6.9m) | 257 (9.4m) | 326 (12.0m) | 395 (14.5m) |
+| 190 | 687 | 204 (7.5m) | 273 (10.0m) | 342 (12.5m) | 410 (15.0m) |
+| 94 | 687 | 211 (7.7m) | 280 (10.3m) | 349 (12.8m) | 417 (15.3m) |
+| 51 | 683 | 181 (6.6m) | 242 (8.9m) | 310 (11.4m) | 378 (13.9m) |
+| 166 | 657 | 198 (7.3m) | 264 (9.7m) | 330 (12.1m) | 395 (14.5m) |
+| 62 | 650 | 187 (6.9m) | 252 (9.2m) | 317 (11.6m) | 382 (14.0m) |
+| 7 | 633 | 180 (6.6m) | 243 (8.9m) | 306 (11.2m) | 369 (13.5m) |
+| 40 | 611 | 181 (6.6m) | 237 (8.7m) | 300 (11.0m) | 361 (13.2m) |
+| 24 | 585 | 172 (6.3m) | 232 (8.5m) | 296 (10.9m) | 355 (13.0m) |
+| 31 | 580 | 160 (5.9m) | 217 (8.0m) | 275 (10.1m) | 328 (12.0m) |
+
+*295 kingdoms total. Full stats available via `known_locations::KINGDOM_STATS`.*
+*Scan times in parentheses assume ~2.2s per position.*
+
+#### Coverage tiers (`MERCY_KNOWN_COVERAGE`)
+
+Not every historical spawn location is equally likely. The `MERCY_KNOWN_COVERAGE` setting (default: 80) controls what percentage of historical spawn weight to cover before stopping. Lower values scan fewer positions — dramatically faster, at the cost of skipping the rarest spawn locations.
+
+Since exchanges pop up, get taken, and respawn frequently, speed matters more than guaranteed detection. Finding the *next* exchange quickly is more valuable than ensuring you never miss one in an unlikely spot.
+
+| Coverage | Avg positions | Avg scan time | Positions saved | Recommended for |
+|---------:|--------------:|--------------:|----------------:|-----------------|
+| **70%** | **136** | **5.0 min** | **40%** | Fast cycling through many kingdoms |
+| **80%** | 171 | 6.3 min | 27% | Default — good balance of speed and coverage |
+| **90%** | 206 | 7.6 min | 13% | Conservative — few blind spots |
+| **100%** | 241 | 8.8 min | 0% | Exhaustive — checks every historical location |
+
+For comparison, the full `grid` pattern scans 1024 positions (~37 min) with no intelligence about where exchanges actually appear.
+
+**Example**: For Kingdom 10 (most data, 935 historical spawns):
+
+| Coverage | Positions | Scan time |
+|---------:|----------:|----------:|
+| 70% | 203 | 7.4 min |
+| 80% | 249 | 9.1 min |
+| 90% | 338 | 12.4 min |
+| 100% | 431 | 15.8 min |
+
+At 70% coverage, the scanner checks the 203 densest cells (where 70% of all historical spawns occurred) and skips the remaining 228 cells that account for only 30% of spawns. If the exchange happens to be in a rare spot, the next scan cycle will catch it — and since exchanges respawn frequently, the expected time to detection remains very low.
+
+#### Regenerating the data
+
+To update the compiled-in data with new historical spawns:
+
+```sh
+# Update assets/known_locations.csv (format: k,x,y per line)
+cd backend
+python3 gen_known_locations.py   # regenerates src/known_locations.rs
+cargo build --release
+```
 
 ### `wide` -- single large spiral
 
@@ -302,11 +340,6 @@ All `confirm_match` outcomes (confirmed, estimate, and rejected) are appended as
 
 ## Future investigation
 
-Areas to explore as `exchanges.jsonl` accumulates more data:
-
-- **Coordinate reuse across respawns**: Do exchanges reuse the same coordinates when they respawn, or does each respawn pick a new random location? If coordinates are reused, the known locations file becomes increasingly complete over time.
-- **Donut distribution validation**: The current 41-point sample shows a clear donut pattern (no spawns within 300 tiles of center). Does this hold with more data, or are there rare center spawns?
-- **Optimal ring count**: Is 1 ring the right default, or should it scale with data confidence? More rings increase discovery area but slow down known-location checking.
-- **Frequency-weighted ordering**: Can ordering known locations by observation frequency (most-seen first) improve average detection time? Locations seen more often may be more likely to have an active exchange.
-- **Kingdom overlap**: Do different kingdoms share the same spawn point pool, or does each kingdom have its own set? The `k` column in the locations file exists to enable per-kingdom filtering once enough data is collected.
-- **Per-kingdom filtering**: If spawn points are kingdom-specific, filter the known locations file by the kingdom being scanned to reduce the number of positions visited. This would further reduce detection time proportional to the number of kingdoms tracked.
+- **Coordinate reuse across respawns**: The 104K-spawn dataset shows heavy reuse — some cells have 9+ spawns across kingdoms. Monitoring whether new spawns appear in previously unseen cells would indicate how complete the known location set is.
+- **Adaptive data updates**: Incorporate newly confirmed exchanges from `exchanges.jsonl` back into `known_locations.csv` and regenerate to keep the compiled-in data current.
+- **Grid fallback for unknown kingdoms**: Kingdoms without historical data fall back to the full grid. As the dataset grows, fewer kingdoms should need this fallback.

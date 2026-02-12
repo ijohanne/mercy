@@ -2,6 +2,7 @@ mod api;
 mod browser;
 mod config;
 mod detector;
+mod known_locations;
 mod scanner;
 mod state;
 
