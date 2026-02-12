@@ -228,6 +228,7 @@ in
       ${cfg.domain} = {
         forceSSL = cfg.nginx.enableSSL;
         enableACME = cfg.nginx.enableSSL;
+        acmeRoot = null;
         locations."/" = {
           proxyPass = "http://127.0.0.1:${toString cfg.frontendPort}";
           proxyWebsockets = true;
