@@ -66,7 +66,7 @@ impl Config {
             .unwrap_or(false);
 
         let search_target =
-            std::env::var("MERCY_SEARCH_TARGET").unwrap_or_else(|_| "Mercenary Exchange".into());
+            std::env::var("MERCY_SEARCH_TARGET").unwrap_or_else(|_| "Mercenary Exchange Core".into());
 
         let debug_screenshots = std::env::var("MERCY_DEBUG_SCREENSHOTS")
             .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))

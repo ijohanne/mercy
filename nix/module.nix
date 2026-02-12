@@ -84,7 +84,7 @@ in
 
     searchTarget = lib.mkOption {
       type = lib.types.str;
-      default = "Mercenary Exchange";
+      default = "Mercenary Exchange Core";
       description = "Building name to search for (determines which reference image to use)";
     };
 
