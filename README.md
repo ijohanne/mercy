@@ -46,7 +46,13 @@ mercy/
 | `MERCY_LISTEN_ADDR` | no | Listen address (default `0.0.0.0:8090`) |
 | `MERCY_CHROMIUM_PATH` | no | Path to Chromium binary |
 | `MERCY_HEADLESS` | no | `true` for headless mode |
-| `MERCY_SEARCH_TARGET` | no | Building name to search for (default `Mercenary Exchange`). Maps to reference image: lowercased, spaces → `_`, plus `_ref.png` (e.g. `"Test Building"` → `test_building_ref.png`). **Quote values with spaces.** |
+| `MERCY_SEARCH_TARGET` | no | Building name to search for (default `Mercenary Exchange Core`). Maps to reference image: lowercased, spaces → `_`, plus `_ref.png` (e.g. `"Test Building"` → `test_building_ref.png`). **Quote values with spaces.** |
+| `MERCY_NAVIGATE_DELAY_MS` | no | Fly-animation wait after goto (default `750`) |
+| `MERCY_SCAN_PATTERN` | no | Scan pattern: `single`, `multi`, `wide`, `grid`, `known` (default `grid`). See [scanning docs](docs/scanning.md). |
+| `MERCY_SCAN_RINGS` | no | Override ring count per pattern (default: pattern-specific) |
+| `MERCY_EXCHANGE_LOG` | no | Path to exchange detection JSONL log (default `exchanges.jsonl`) |
+| `MERCY_KNOWN_LOCATIONS` | no | Known locations CSV (`k,x,y` format) for `known` scan pattern |
+| `MERCY_MAX_DETECT_TASKS` | no | Max concurrent template-matching tasks (default `4`) |
 
 ### Frontend
 
