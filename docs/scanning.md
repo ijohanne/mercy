@@ -6,13 +6,12 @@ How the scanner navigates the game map and finds exchanges.
 - [Exchange spawn distribution](#exchange-spawn-distribution)
 - [Viewport geometry](#viewport-geometry)
 - [Scan patterns](#scan-patterns)
-  - [`known` -- known locations + discovery](#known----known-locations--discovery)
+  - [`known` -- compiled-in historical hotspots](#known----compiled-in-historical-hotspots)
   - [`wide` -- single large spiral](#wide----single-large-spiral)
   - [`multi` -- 9 interleaved spirals](#multi----9-interleaved-spirals)
   - [`grid` -- full map sweep](#grid-default----full-map-sweep)
   - [`single` -- small spiral](#single----small-spiral)
 - [Exchange logging](#exchange-logging)
-- [Future investigation](#future-investigation)
 
 ## Coordinate system
 
@@ -338,8 +337,4 @@ All `confirm_match` outcomes (confirmed, estimate, and rejected) are appended as
 - `initial_score`: template match score from the scan screenshot
 - `calibration_score`: template match score from the goto screenshot (null if no match)
 
-## Future investigation
-
-- **Coordinate reuse across respawns**: The 104K-spawn dataset shows heavy reuse — some cells have 9+ spawns across kingdoms. Monitoring whether new spawns appear in previously unseen cells would indicate how complete the known location set is.
-- **Adaptive data updates**: Incorporate newly confirmed exchanges from `exchanges.jsonl` back into `known_locations.csv` and regenerate to keep the compiled-in data current.
-- **Grid fallback for unknown kingdoms**: Kingdoms without historical data fall back to the full grid. As the dataset grows, fewer kingdoms should need this fallback.
+> **Note:** The compiled-in historical data can be kept current by merging newly confirmed exchanges from `exchanges.jsonl` into `backend/assets/known_locations.csv` and regenerating with `python3 gen_known_locations.py`. Raw historical data is archived in `docs/historical-spawns.csv`.
