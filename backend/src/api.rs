@@ -28,6 +28,7 @@ pub fn router(state: AppState, ref_images: Arc<Vec<PreparedRef>>) -> Router {
         .route("/screenshot", get(get_screenshot))
         .route("/goto", get(goto_coords))
         .route("/detect", get(detect_match))
+        .route("/scan-kingdom", post(scan_kingdom_handler))
         .with_state(ApiState {
             app: state,
             ref_images,
@@ -127,6 +128,7 @@ async fn stop_scan(
     } else {
         ScannerPhase::Idle
     };
+    state.manual_scan_kingdom = None;
 
     Ok(Json(json!({"status": "stopped"})))
 }
@@ -222,6 +224,7 @@ struct StatusResponse {
     paused: bool,
     current_kingdom: Option<u32>,
     exchanges_found: usize,
+    manual_scan_kingdom: Option<u32>,
 }
 
 async fn get_status(
@@ -237,6 +240,7 @@ async fn get_status(
         paused: state.phase == ScannerPhase::Paused,
         current_kingdom: state.current_kingdom,
         exchanges_found: state.exchanges.len(),
+        manual_scan_kingdom: state.manual_scan_kingdom,
     }))
 }
 
@@ -424,4 +428,58 @@ async fn detect_match(
     };
 
     Ok(Json(resp))
+}
+
+#[derive(Deserialize)]
+struct ScanKingdomRequest {
+    kingdom: u32,
+}
+
+async fn scan_kingdom_handler(
+    State(api): State<ApiState>,
+    headers: HeaderMap,
+    Json(body): Json<ScanKingdomRequest>,
+) -> Result<impl IntoResponse, StatusCode> {
+    let state = api.app.lock().await;
+    check_auth(&headers, &state.config.auth_token)?;
+
+    match state.phase {
+        ScannerPhase::Scanning | ScannerPhase::Paused => {
+            // Scanner loop is running — send via priority channel
+            if let Some(ref tx) = state.priority_scan_tx {
+                tx.send(body.kingdom).map_err(|_| {
+                    tracing::error!("priority scan channel closed");
+                    StatusCode::INTERNAL_SERVER_ERROR
+                })?;
+                Ok(Json(json!({"status": "queued"})))
+            } else {
+                tracing::error!("scanner running but no priority channel");
+                Err(StatusCode::INTERNAL_SERVER_ERROR)
+            }
+        }
+        ScannerPhase::Ready | ScannerPhase::Idle => {
+            drop(state);
+
+            let app_state = api.app.clone();
+            let ref_images = api.ref_images.clone();
+            let kingdom = body.kingdom;
+            tokio::spawn(async move {
+                if let Err(e) =
+                    scanner::run_single_kingdom_scan(app_state.clone(), ref_images, kingdom).await
+                {
+                    tracing::error!("one-shot scan error: {e:#}");
+                    let mut s = app_state.lock().await;
+                    s.manual_scan_kingdom = None;
+                    s.phase = if s.browser.is_some() {
+                        ScannerPhase::Ready
+                    } else {
+                        ScannerPhase::Idle
+                    };
+                }
+            });
+
+            Ok(Json(json!({"status": "started"})))
+        }
+        ScannerPhase::Preparing => Err(StatusCode::CONFLICT),
+    }
 }

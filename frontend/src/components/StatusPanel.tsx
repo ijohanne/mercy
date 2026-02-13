@@ -46,6 +46,12 @@ export default function StatusPanel({ status }: { status: StatusResponse | null 
             <p className="text-muted-foreground">Exchanges found</p>
             <p className="font-medium">{status.exchanges_found}</p>
           </div>
+          {status.manual_scan_kingdom != null && (
+            <div>
+              <p className="text-muted-foreground">Manual scan</p>
+              <p className="font-medium">K:{status.manual_scan_kingdom}</p>
+            </div>
+          )}
         </div>
       </CardContent>
     </Card>

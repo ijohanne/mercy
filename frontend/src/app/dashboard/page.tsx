@@ -6,6 +6,7 @@ import ActionButtons from '@/components/ActionButtons';
 import ExchangeList from '@/components/ExchangeList';
 import ScreenshotView from '@/components/ScreenshotView';
 import GotoForm from '@/components/GotoForm';
+import ManualScanForm from '@/components/ManualScanForm';
 import { proxyGet } from '@/lib/api';
 import type { StatusResponse, Exchange } from '@/lib/api';
 
@@ -41,6 +42,7 @@ export default function DashboardPage() {
         <div className="space-y-6">
           <ScreenshotView />
           <GotoForm />
+          <ManualScanForm status={status} onAction={fetchData} />
         </div>
       </div>
     </div>

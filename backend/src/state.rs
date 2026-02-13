@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use serde::Serialize;
-use tokio::sync::{Mutex, Notify};
+use tokio::sync::{Mutex, Notify, mpsc};
 use tokio::task::JoinHandle;
 
 use crate::browser::GameBrowser;
@@ -45,6 +45,10 @@ pub struct AppStateInner {
     pub last_kingdom_scan: HashMap<u32, DateTime<Utc>>,
     /// Last screenshot taken (by goto or refresh), reused by detect.
     pub last_screenshot: Option<Vec<u8>>,
+    /// Sender for priority (manual) kingdom scans; set while scanner loop runs.
+    pub priority_scan_tx: Option<mpsc::UnboundedSender<u32>>,
+    /// Kingdom currently being scanned manually (for status reporting).
+    pub manual_scan_kingdom: Option<u32>,
 }
 
 pub type AppState = Arc<Mutex<AppStateInner>>;
@@ -61,6 +65,8 @@ impl AppStateInner {
             pause_notify: Arc::new(Notify::new()),
             last_kingdom_scan: HashMap::new(),
             last_screenshot: None,
+            priority_scan_tx: None,
+            manual_scan_kingdom: None,
         }
     }
 

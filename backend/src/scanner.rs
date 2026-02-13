@@ -133,10 +133,12 @@ pub async fn run_scan(state: AppState, ref_images: Arc<Vec<PreparedRef>>) -> Res
 
     let game = prepare_browser(&state).await?;
 
-    // Set phase to Scanning
+    // Create priority scan channel and store sender in state
+    let (priority_tx, mut priority_rx) = tokio::sync::mpsc::unbounded_channel::<u32>();
     {
         let mut s = state.lock().await;
         s.phase = ScannerPhase::Scanning;
+        s.priority_scan_tx = Some(priority_tx);
     }
 
     tracing::info!("starting kingdom scan loop");
@@ -145,8 +147,30 @@ pub async fn run_scan(state: AppState, ref_images: Arc<Vec<PreparedRef>>) -> Res
 
     loop {
         for &kingdom in &config.kingdoms {
+            // Drain priority queue: scan any manually-requested kingdoms first
+            while let Ok(prio_kingdom) = priority_rx.try_recv() {
+                tracing::info!("priority scan requested for kingdom {prio_kingdom}");
+                {
+                    let mut s = state.lock().await;
+                    s.manual_scan_kingdom = Some(prio_kingdom);
+                    s.current_kingdom = Some(prio_kingdom);
+                }
+                if let Err(e) =
+                    scan_kingdom(&game, &state, prio_kingdom, &ref_images, &config).await
+                {
+                    tracing::error!("error in priority scan of kingdom {prio_kingdom}: {e:#}");
+                }
+                {
+                    let mut s = state.lock().await;
+                    s.set_last_scan_time(prio_kingdom);
+                    s.manual_scan_kingdom = None;
+                }
+            }
+
             if !check_should_continue(&state).await {
                 tracing::info!("scanner stopped");
+                // Clear priority_scan_tx on exit
+                state.lock().await.priority_scan_tx = None;
                 return Ok(());
             }
 
@@ -213,6 +237,43 @@ pub async fn run_scan(state: AppState, ref_images: Arc<Vec<PreparedRef>>) -> Res
 
         tracing::info!("completed scan pass, restarting");
     }
+}
+
+/// Run a single kingdom scan when the scanner loop is not active (Ready/Idle).
+pub async fn run_single_kingdom_scan(
+    state: AppState,
+    ref_images: Arc<Vec<PreparedRef>>,
+    kingdom: u32,
+) -> Result<()> {
+    let config = {
+        let s = state.lock().await;
+        s.config.clone()
+    };
+
+    let game = prepare_browser(&state).await?;
+
+    {
+        let mut s = state.lock().await;
+        s.phase = ScannerPhase::Scanning;
+        s.manual_scan_kingdom = Some(kingdom);
+        s.current_kingdom = Some(kingdom);
+    }
+
+    tracing::info!("one-shot scan for kingdom {kingdom}");
+    let result = scan_kingdom(&game, &state, kingdom, &ref_images, &config).await;
+
+    {
+        let mut s = state.lock().await;
+        s.set_last_scan_time(kingdom);
+        s.manual_scan_kingdom = None;
+        s.current_kingdom = None;
+        s.phase = ScannerPhase::Ready;
+    }
+
+    if let Err(ref e) = result {
+        tracing::error!("one-shot scan of kingdom {kingdom} failed: {e:#}");
+    }
+    result
 }
 
 /// Navigate to known exchange coordinates, screenshot, and check if the exchange

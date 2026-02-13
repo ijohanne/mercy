@@ -8,12 +8,22 @@ export async function proxyPost(path: string): Promise<Response> {
   return fetch(`${PROXY_BASE}/${path}`, { method: 'POST', cache: 'no-store' });
 }
 
+export async function proxyPostJson(path: string, body: unknown): Promise<Response> {
+  return fetch(`${PROXY_BASE}/${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    cache: 'no-store',
+  });
+}
+
 export interface StatusResponse {
   phase: 'idle' | 'preparing' | 'ready' | 'scanning' | 'paused';
   running: boolean;
   paused: boolean;
   current_kingdom: number | null;
   exchanges_found: number;
+  manual_scan_kingdom: number | null;
 }
 
 export interface Exchange {
