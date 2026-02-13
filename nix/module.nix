@@ -1,4 +1,9 @@
-{ config, lib, pkgs, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
 
 let
   cfg = config.services.mercy;
@@ -171,7 +176,8 @@ in
         MERCY_EXCHANGE_LOG = cfg.exchangeLog;
         MERCY_KNOWN_COVERAGE = toString cfg.knownCoverage;
         MERCY_MAX_DETECT_TASKS = toString cfg.maxDetectTasks;
-      } // lib.optionalAttrs (cfg.scanRings != null) {
+      }
+      // lib.optionalAttrs (cfg.scanRings != null) {
         MERCY_SCAN_RINGS = toString cfg.scanRings;
       };
 
@@ -222,7 +228,7 @@ in
         CacheDirectory = "mercy-frontend";
         WorkingDirectory = "${cfg.frontendPackage}";
 
-        ExecStartPre = "${pkgs.coreutils}/bin/rm -rf /var/cache/mercy-frontend/*";
+        ExecStartPre = "${pkgs.findutils}/bin/find /var/cache/mercy-frontend -mindepth 1 -delete";
         ExecStart = frontendStartScript;
 
         Restart = "on-failure";
