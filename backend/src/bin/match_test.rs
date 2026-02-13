@@ -24,8 +24,7 @@ fn main() {
     let prepared = detector::prepare_reference_images(&[ref_img]);
     println!(
         "Prepared: {}x{} RGB per-channel",
-        prepared[0].width,
-        prepared[0].height
+        prepared[0].width, prepared[0].height
     );
     println!("Threshold: {:.4}", detector::MATCH_THRESHOLD);
     println!();

@@ -103,9 +103,11 @@ impl AppStateInner {
 
     /// Update `found_at` to now for the matching exchange.
     pub fn refresh_exchange(&mut self, kingdom: u32, x: u32, y: u32) {
-        if let Some(e) = self.exchanges.iter_mut().find(|e| {
-            e.kingdom == kingdom && e.x == x && e.y == y
-        }) {
+        if let Some(e) = self
+            .exchanges
+            .iter_mut()
+            .find(|e| e.kingdom == kingdom && e.x == x && e.y == y)
+        {
             e.found_at = Utc::now();
         }
     }

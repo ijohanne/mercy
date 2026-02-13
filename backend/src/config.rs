@@ -61,7 +61,8 @@ impl Config {
         let tb_email = required_env("MERCY_TB_EMAIL")?;
         let tb_password = required_env("MERCY_TB_PASSWORD")?;
 
-        let listen_addr = std::env::var("MERCY_LISTEN_ADDR").unwrap_or_else(|_| "0.0.0.0:8090".into());
+        let listen_addr =
+            std::env::var("MERCY_LISTEN_ADDR").unwrap_or_else(|_| "0.0.0.0:8090".into());
 
         let chromium_path = std::env::var("MERCY_CHROMIUM_PATH").ok();
 
@@ -69,8 +70,8 @@ impl Config {
             .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
             .unwrap_or(false);
 
-        let search_target =
-            std::env::var("MERCY_SEARCH_TARGET").unwrap_or_else(|_| "Mercenary Exchange Core".into());
+        let search_target = std::env::var("MERCY_SEARCH_TARGET")
+            .unwrap_or_else(|_| "Mercenary Exchange Core".into());
 
         let debug_screenshots = std::env::var("MERCY_DEBUG_SCREENSHOTS")
             .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
@@ -81,8 +82,7 @@ impl Config {
             .and_then(|v| v.parse().ok())
             .unwrap_or(750);
 
-        let scan_pattern =
-            std::env::var("MERCY_SCAN_PATTERN").unwrap_or_else(|_| "grid".into());
+        let scan_pattern = std::env::var("MERCY_SCAN_PATTERN").unwrap_or_else(|_| "grid".into());
 
         let scan_rings = std::env::var("MERCY_SCAN_RINGS")
             .ok()

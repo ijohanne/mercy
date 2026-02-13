@@ -1,12 +1,11 @@
-use imageproc::template_matching::{match_template, MatchTemplateMethod};
+use imageproc::template_matching::{MatchTemplateMethod, match_template};
 
 fn main() {
-    let screenshot = image::open("screenshot.png")
-        .expect("failed to open screenshot.png");
+    let screenshot = image::open("screenshot.png").expect("failed to open screenshot.png");
     println!("screenshot: {}x{}", screenshot.width(), screenshot.height());
 
-    let ref_img = image::open("assets/test_building_ref.png")
-        .expect("failed to open test_building_ref.png");
+    let ref_img =
+        image::open("assets/test_building_ref.png").expect("failed to open test_building_ref.png");
     println!("reference: {}x{}", ref_img.width(), ref_img.height());
 
     // Crop to game viewport (matching detector.rs constants)
@@ -20,14 +19,22 @@ fn main() {
 
     println!(
         "downscaled: screenshot {}x{}, template {}x{}",
-        ss_gray.width(), ss_gray.height(),
-        ref_gray.width(), ref_gray.height()
+        ss_gray.width(),
+        ss_gray.height(),
+        ref_gray.width(),
+        ref_gray.height()
     );
 
     // Test both methods
     for method in [
-        ("CrossCorrelationNormalized", MatchTemplateMethod::CrossCorrelationNormalized),
-        ("SumOfSquaredErrorsNormalized", MatchTemplateMethod::SumOfSquaredErrorsNormalized),
+        (
+            "CrossCorrelationNormalized",
+            MatchTemplateMethod::CrossCorrelationNormalized,
+        ),
+        (
+            "SumOfSquaredErrorsNormalized",
+            MatchTemplateMethod::SumOfSquaredErrorsNormalized,
+        ),
     ] {
         println!("\n=== {} ===", method.0);
         let result = match_template(&ss_gray, &ref_gray, method.1);
@@ -42,7 +49,8 @@ fn main() {
         scores.sort_by(|a, b| a.partial_cmp(b).unwrap());
 
         let len = scores.len();
-        println!("  min={:.4} p5={:.4} p25={:.4} median={:.4} p75={:.4} p95={:.4} max={:.4}",
+        println!(
+            "  min={:.4} p5={:.4} p25={:.4} median={:.4} p75={:.4} p95={:.4} max={:.4}",
             scores[0],
             scores[len * 5 / 100],
             scores[len * 25 / 100],

@@ -1,12 +1,12 @@
 use anyhow::{Context, Result};
+use chromiumoxide::Page;
 use chromiumoxide::browser::{Browser, BrowserConfig};
 use chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotFormat;
 use chromiumoxide::handler::viewport::Viewport;
 use chromiumoxide::page::ScreenshotParams;
-use chromiumoxide::Page;
 use futures::StreamExt;
 use thiserror::Error;
-use tokio::time::{sleep, Duration};
+use tokio::time::{Duration, sleep};
 
 use crate::config::Config;
 
@@ -87,9 +87,11 @@ impl GameBrowser {
             .context("failed to create new page")?;
 
         // Override navigator.webdriver to avoid detection
-        page.execute(chromiumoxide::cdp::browser_protocol::page::AddScriptToEvaluateOnNewDocumentParams::new(
-            "Object.defineProperty(navigator, 'webdriver', { get: () => false });".to_string(),
-        ))
+        page.execute(
+            chromiumoxide::cdp::browser_protocol::page::AddScriptToEvaluateOnNewDocumentParams::new(
+                "Object.defineProperty(navigator, 'webdriver', { get: () => false });".to_string(),
+            ),
+        )
         .await
         .context("failed to inject webdriver override")?;
 
@@ -114,7 +116,9 @@ impl GameBrowser {
 
         // Accept cookie consent banner (Didomi)
         tracing::info!("accepting cookies");
-        self.click_by_selector("#didomi-notice-agree-button").await.ok();
+        self.click_by_selector("#didomi-notice-agree-button")
+            .await
+            .ok();
         sleep(Duration::from_secs(1)).await;
 
         // Click "Log In" link inside the visible registration popup.
@@ -309,22 +313,33 @@ impl GameBrowser {
         let end_y = start_y - dy as f64;
 
         // Move to start
-        self.page.execute(
-            DispatchMouseEventParams::builder()
-                .r#type(DispatchMouseEventType::MouseMoved)
-                .x(start_x).y(start_y)
-                .build().unwrap(),
-        ).await.context("drag: move to start")?;
+        self.page
+            .execute(
+                DispatchMouseEventParams::builder()
+                    .r#type(DispatchMouseEventType::MouseMoved)
+                    .x(start_x)
+                    .y(start_y)
+                    .build()
+                    .unwrap(),
+            )
+            .await
+            .context("drag: move to start")?;
         sleep(Duration::from_millis(50)).await;
 
         // Press
-        self.page.execute(
-            DispatchMouseEventParams::builder()
-                .r#type(DispatchMouseEventType::MousePressed)
-                .x(start_x).y(start_y)
-                .button(MouseButton::Left).click_count(1)
-                .build().unwrap(),
-        ).await.context("drag: press")?;
+        self.page
+            .execute(
+                DispatchMouseEventParams::builder()
+                    .r#type(DispatchMouseEventType::MousePressed)
+                    .x(start_x)
+                    .y(start_y)
+                    .button(MouseButton::Left)
+                    .click_count(1)
+                    .build()
+                    .unwrap(),
+            )
+            .await
+            .context("drag: press")?;
         sleep(Duration::from_millis(50)).await;
 
         // Move in steps for smoother drag (some engines need intermediate moves)
@@ -333,24 +348,36 @@ impl GameBrowser {
             let frac = i as f64 / steps as f64;
             let mx = start_x + (end_x - start_x) * frac;
             let my = start_y + (end_y - start_y) * frac;
-            self.page.execute(
-                DispatchMouseEventParams::builder()
-                    .r#type(DispatchMouseEventType::MouseMoved)
-                    .x(mx).y(my)
-                    .button(MouseButton::Left).buttons(1_i64)
-                    .build().unwrap(),
-            ).await.context("drag: move step")?;
+            self.page
+                .execute(
+                    DispatchMouseEventParams::builder()
+                        .r#type(DispatchMouseEventType::MouseMoved)
+                        .x(mx)
+                        .y(my)
+                        .button(MouseButton::Left)
+                        .buttons(1_i64)
+                        .build()
+                        .unwrap(),
+                )
+                .await
+                .context("drag: move step")?;
             sleep(Duration::from_millis(30)).await;
         }
 
         // Release
-        self.page.execute(
-            DispatchMouseEventParams::builder()
-                .r#type(DispatchMouseEventType::MouseReleased)
-                .x(end_x).y(end_y)
-                .button(MouseButton::Left).click_count(1)
-                .build().unwrap(),
-        ).await.context("drag: release")?;
+        self.page
+            .execute(
+                DispatchMouseEventParams::builder()
+                    .r#type(DispatchMouseEventType::MouseReleased)
+                    .x(end_x)
+                    .y(end_y)
+                    .button(MouseButton::Left)
+                    .click_count(1)
+                    .build()
+                    .unwrap(),
+            )
+            .await
+            .context("drag: release")?;
 
         sleep(Duration::from_secs(1)).await;
         Ok(())
@@ -838,9 +865,11 @@ impl GameBrowser {
             selector = selector.replace('\'', "\\'"),
         );
 
-        let result = self.page.evaluate(js).await.context(format!(
-            "click_by_selector({selector}) failed"
-        ))?;
+        let result = self
+            .page
+            .evaluate(js)
+            .await
+            .context(format!("click_by_selector({selector}) failed"))?;
 
         let clicked = result.into_value::<bool>().unwrap_or(false);
         if !clicked {
@@ -848,7 +877,6 @@ impl GameBrowser {
         }
         Ok(())
     }
-
 }
 
 /// Extract coordinates from popup text like "(K:111 X:506 Y:638)"

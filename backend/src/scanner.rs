@@ -5,7 +5,7 @@ use std::time::Instant;
 use anyhow::{Context, Result};
 use chrono::Utc;
 use serde::Serialize;
-use tokio::time::{sleep, Duration};
+use tokio::time::{Duration, sleep};
 
 use crate::browser::{self, GameBrowser};
 use crate::config::Config;
@@ -173,9 +173,7 @@ pub async fn run_scan(state: AppState, ref_images: Arc<Vec<PreparedRef>>) -> Res
                                 tracing::info!("kingdom {kingdom}: exchange still present");
                                 let mut s = state.lock().await;
                                 s.refresh_exchange(kingdom, ex, ey);
-                                let remaining = (cooldown - elapsed)
-                                    .to_std()
-                                    .unwrap_or_default();
+                                let remaining = (cooldown - elapsed).to_std().unwrap_or_default();
                                 drop(s);
                                 sleep(remaining).await;
                                 continue;
@@ -194,9 +192,7 @@ pub async fn run_scan(state: AppState, ref_images: Arc<Vec<PreparedRef>>) -> Res
                     } else {
                         // No known exchange but recently scanned — wait out cooldown
                         tracing::info!("kingdom {kingdom}: cooldown active, waiting");
-                        let remaining = (cooldown - elapsed)
-                            .to_std()
-                            .unwrap_or_default();
+                        let remaining = (cooldown - elapsed).to_std().unwrap_or_default();
                         sleep(remaining).await;
                         // Fall through to full scan after cooldown
                     }
@@ -248,7 +244,9 @@ async fn verify_exchange(
             let good_score = m.score >= 0.90;
             tracing::info!(
                 "verify K:{kingdom} ({x},{y}): pixel ({},{}) score={:.4} err=({err_x:.0},{err_y:.0}) near={near_center} good={good_score}",
-                m.x, m.y, m.score
+                m.x,
+                m.y,
+                m.score
             );
             Ok(near_center && good_score)
         }
@@ -299,16 +297,43 @@ async fn scan_kingdom(
             let scan_secs = scan_start.elapsed().as_secs_f64();
             tracing::info!(
                 "async detection from step {}/{}: {} match(es), best pixel ({}, {}) score={:.4}",
-                det.step_index + 1, total, det.matches.len(), m.x, m.y, m.score
+                det.step_index + 1,
+                total,
+                det.matches.len(),
+                m.x,
+                m.y,
+                m.score
             );
-            match confirm_match(game, state, kingdom, m.x, m.y, det.nav_x, det.nav_y, m.score, Some(scan_secs), config, ref_images).await {
+            match confirm_match(
+                game,
+                state,
+                kingdom,
+                m.x,
+                m.y,
+                det.nav_x,
+                det.nav_y,
+                m.score,
+                Some(scan_secs),
+                config,
+                ref_images,
+            )
+            .await
+            {
                 Ok(true) => {
                     let elapsed = scan_start.elapsed();
-                    tracing::info!("kingdom {kingdom} scan completed in {elapsed:.1?} (confirmed at step {}/{})", det.step_index + 1, total);
+                    tracing::info!(
+                        "kingdom {kingdom} scan completed in {elapsed:.1?} (confirmed at step {}/{})",
+                        det.step_index + 1,
+                        total
+                    );
                     return Ok(());
                 }
                 Ok(false) => {
-                    tracing::info!("match not confirmed at step {}/{}, resuming scan", det.step_index + 1, total);
+                    tracing::info!(
+                        "match not confirmed at step {}/{}, resuming scan",
+                        det.step_index + 1,
+                        total
+                    );
                     // Drain any stale detections
                     while rx.try_recv().is_ok() {}
                 }
@@ -343,7 +368,10 @@ async fn scan_kingdom(
         }
 
         // Acquire semaphore permit — blocks scan loop if too many detections queued
-        let permit = semaphore.clone().acquire_owned().await
+        let permit = semaphore
+            .clone()
+            .acquire_owned()
+            .await
             .expect("semaphore closed unexpectedly");
 
         // Spawn detection in background (CPU-bound work overlaps with next navigation)
@@ -375,7 +403,8 @@ async fn scan_kingdom(
 
             tracing::info!(
                 "step {}/{total}: found {} match(es) (async)",
-                i + 1, matches.len()
+                i + 1,
+                matches.len()
             );
 
             let _ = tx.send(DetectionResult {
@@ -394,16 +423,42 @@ async fn scan_kingdom(
         let scan_secs = scan_start.elapsed().as_secs_f64();
         tracing::info!(
             "final async detection from step {}/{}: best pixel ({}, {}) score={:.4}",
-            det.step_index + 1, total, m.x, m.y, m.score
+            det.step_index + 1,
+            total,
+            m.x,
+            m.y,
+            m.score
         );
-        match confirm_match(game, state, kingdom, m.x, m.y, det.nav_x, det.nav_y, m.score, Some(scan_secs), config, ref_images).await {
+        match confirm_match(
+            game,
+            state,
+            kingdom,
+            m.x,
+            m.y,
+            det.nav_x,
+            det.nav_y,
+            m.score,
+            Some(scan_secs),
+            config,
+            ref_images,
+        )
+        .await
+        {
             Ok(true) => {
                 let elapsed = scan_start.elapsed();
-                tracing::info!("kingdom {kingdom} scan completed in {elapsed:.1?} (confirmed at step {}/{})", det.step_index + 1, total);
+                tracing::info!(
+                    "kingdom {kingdom} scan completed in {elapsed:.1?} (confirmed at step {}/{})",
+                    det.step_index + 1,
+                    total
+                );
                 return Ok(());
             }
             Ok(false) => {
-                tracing::info!("final match not confirmed at step {}/{}", det.step_index + 1, total);
+                tracing::info!(
+                    "final match not confirmed at step {}/{}",
+                    det.step_index + 1,
+                    total
+                );
             }
             Err(e) => {
                 tracing::warn!("failed to confirm final match: {e:#}");
@@ -489,8 +544,8 @@ async fn confirm_match(
     }
 
     // Calibration: re-run template matching on goto screenshot to refine position
-    let goto_img = image::load_from_memory(&goto_bytes)
-        .context("failed to decode goto screenshot")?;
+    let goto_img =
+        image::load_from_memory(&goto_bytes).context("failed to decode goto screenshot")?;
     let calibration = detector::find_best_match(&goto_img, ref_images);
 
     // Refine coordinates using calibration offset (accounts for sprite height)
@@ -499,7 +554,9 @@ async fn confirm_match(
         let err_y = gm.y as f64 - SCREEN_CENTER_Y;
         tracing::info!(
             "CALIBRATION: building at pixel ({}, {}), score={:.4}, error from center: ({err_x:.0}, {err_y:.0})",
-            gm.x, gm.y, gm.score
+            gm.x,
+            gm.y,
+            gm.score
         );
 
         // The calibration error tells us how far the building is from where we
@@ -507,7 +564,9 @@ async fn confirm_match(
         let (corr_dx, corr_dy) = pixel_to_game_offset(gm.x, gm.y);
         let rx = (est_x as i32 + corr_dx).clamp(0, 1023) as u32;
         let ry = (est_y as i32 + corr_dy).clamp(0, 1023) as u32;
-        tracing::info!("refined coords: K:{kingdom} X:{rx} Y:{ry} (correction: {corr_dx}, {corr_dy})");
+        tracing::info!(
+            "refined coords: K:{kingdom} X:{rx} Y:{ry} (correction: {corr_dx}, {corr_dy})"
+        );
 
         (rx, ry, gm.x as f64, gm.y as f64)
     } else {
@@ -560,41 +619,50 @@ async fn confirm_match(
             let mut s = state.lock().await;
             let stored = s.add_exchange(exchange);
             if stored {
-                tracing::info!("added exchange K:{k} X:{x} Y:{y} confirmed (total: {})", s.exchanges.len());
+                tracing::info!(
+                    "added exchange K:{k} X:{x} Y:{y} confirmed (total: {})",
+                    s.exchanges.len()
+                );
             } else {
                 tracing::debug!("duplicate or full, skipping K:{k} X:{x} Y:{y}");
             }
             drop(s);
 
-            log_exchange(config, &ExchangeLogEntry {
-                timestamp: Utc::now().to_rfc3339(),
-                kingdom: k,
-                x,
-                y,
-                confirmed: true,
-                stored,
-                initial_score,
-                calibration_score: cal_score,
-                scan_pattern: config.scan_pattern.clone(),
-                scan_duration_secs,
-            });
+            log_exchange(
+                config,
+                &ExchangeLogEntry {
+                    timestamp: Utc::now().to_rfc3339(),
+                    kingdom: k,
+                    x,
+                    y,
+                    confirmed: true,
+                    stored,
+                    initial_score,
+                    calibration_score: cal_score,
+                    scan_pattern: config.scan_pattern.clone(),
+                    scan_duration_secs,
+                },
+            );
 
             true
         } else {
             tracing::info!("popup text has no coords, not confirmed: {text}");
 
-            log_exchange(config, &ExchangeLogEntry {
-                timestamp: Utc::now().to_rfc3339(),
-                kingdom,
-                x: refined_x,
-                y: refined_y,
-                confirmed: false,
-                stored: false,
-                initial_score,
-                calibration_score: cal_score,
-                scan_pattern: config.scan_pattern.clone(),
-                scan_duration_secs,
-            });
+            log_exchange(
+                config,
+                &ExchangeLogEntry {
+                    timestamp: Utc::now().to_rfc3339(),
+                    kingdom,
+                    x: refined_x,
+                    y: refined_y,
+                    confirmed: false,
+                    stored: false,
+                    initial_score,
+                    calibration_score: cal_score,
+                    scan_pattern: config.scan_pattern.clone(),
+                    scan_duration_secs,
+                },
+            );
 
             false
         }
@@ -621,41 +689,52 @@ async fn confirm_match(
             let mut s = state.lock().await;
             let stored = s.add_exchange(exchange);
             if stored {
-                tracing::info!("added exchange K:{kingdom} X:{refined_x} Y:{refined_y} (estimate, total: {})", s.exchanges.len());
+                tracing::info!(
+                    "added exchange K:{kingdom} X:{refined_x} Y:{refined_y} (estimate, total: {})",
+                    s.exchanges.len()
+                );
             } else {
-                tracing::debug!("duplicate or full, skipping K:{kingdom} X:{refined_x} Y:{refined_y}");
+                tracing::debug!(
+                    "duplicate or full, skipping K:{kingdom} X:{refined_x} Y:{refined_y}"
+                );
             }
             drop(s);
 
-            log_exchange(config, &ExchangeLogEntry {
-                timestamp: Utc::now().to_rfc3339(),
-                kingdom,
-                x: refined_x,
-                y: refined_y,
-                confirmed: false,
-                stored,
-                initial_score,
-                calibration_score: cal_score,
-                scan_pattern: config.scan_pattern.clone(),
-                scan_duration_secs,
-            });
+            log_exchange(
+                config,
+                &ExchangeLogEntry {
+                    timestamp: Utc::now().to_rfc3339(),
+                    kingdom,
+                    x: refined_x,
+                    y: refined_y,
+                    confirmed: false,
+                    stored,
+                    initial_score,
+                    calibration_score: cal_score,
+                    scan_pattern: config.scan_pattern.clone(),
+                    scan_duration_secs,
+                },
+            );
 
             true
         } else {
             tracing::info!("no popup and weak/no calibration, not confirmed");
 
-            log_exchange(config, &ExchangeLogEntry {
-                timestamp: Utc::now().to_rfc3339(),
-                kingdom,
-                x: refined_x,
-                y: refined_y,
-                confirmed: false,
-                stored: false,
-                initial_score,
-                calibration_score: cal_score,
-                scan_pattern: config.scan_pattern.clone(),
-                scan_duration_secs,
-            });
+            log_exchange(
+                config,
+                &ExchangeLogEntry {
+                    timestamp: Utc::now().to_rfc3339(),
+                    kingdom,
+                    x: refined_x,
+                    y: refined_y,
+                    confirmed: false,
+                    stored: false,
+                    initial_score,
+                    calibration_score: cal_score,
+                    scan_pattern: config.scan_pattern.clone(),
+                    scan_duration_secs,
+                },
+            );
 
             false
         }
@@ -932,7 +1011,10 @@ mod tests {
         let ring1_start = positions[9];
         let dx = (ring1_start.0 as i32 - 512).abs();
         let dy = (ring1_start.1 as i32 - 512).abs();
-        assert!(dx <= 25 && dy <= 25, "ring 1 should start near center spiral: {ring1_start:?}");
+        assert!(
+            dx <= 25 && dy <= 25,
+            "ring 1 should start near center spiral: {ring1_start:?}"
+        );
     }
 
     // --- Wide spiral tests ---
@@ -994,7 +1076,8 @@ mod tests {
         let positions = grid_scan_positions();
         // Check first row has uniform X spacing of 30
         let first_y = positions[0].1;
-        let first_row: Vec<u32> = positions.iter()
+        let first_row: Vec<u32> = positions
+            .iter()
             .filter(|p| p.1 == first_y)
             .map(|p| p.0)
             .collect();
@@ -1009,7 +1092,10 @@ mod tests {
     fn test_known_positions_full_coverage() {
         let positions = known_positions(10, 100);
         assert!(!positions.is_empty(), "kingdom 10 should have data");
-        assert!(positions.len() < 1024, "should be fewer positions than full grid");
+        assert!(
+            positions.len() < 1024,
+            "should be fewer positions than full grid"
+        );
 
         for &(x, y) in &positions {
             assert!(x <= 1023, "x={x} out of bounds");
@@ -1029,9 +1115,18 @@ mod tests {
         let p80 = known_positions(10, 80);
         let p70 = known_positions(10, 70);
 
-        assert!(p70.len() < p80.len(), "70% should have fewer positions than 80%");
-        assert!(p80.len() < p90.len(), "80% should have fewer positions than 90%");
-        assert!(p90.len() < p100.len(), "90% should have fewer positions than 100%");
+        assert!(
+            p70.len() < p80.len(),
+            "70% should have fewer positions than 80%"
+        );
+        assert!(
+            p80.len() < p90.len(),
+            "80% should have fewer positions than 90%"
+        );
+        assert!(
+            p90.len() < p100.len(),
+            "90% should have fewer positions than 100%"
+        );
     }
 
     #[test]
@@ -1047,7 +1142,10 @@ mod tests {
         for &(k, spawns, positions) in stats {
             assert!(spawns > 0, "kingdom {k} has 0 spawns");
             assert!(positions > 0, "kingdom {k} has 0 positions");
-            assert!(positions <= spawns, "kingdom {k} has more positions than spawns");
+            assert!(
+                positions <= spawns,
+                "kingdom {k} has more positions than spawns"
+            );
         }
     }
 
@@ -1060,7 +1158,8 @@ mod tests {
             assert!(
                 window[0].2 >= window[1].2,
                 "spawn counts not descending: {} < {}",
-                window[0].2, window[1].2
+                window[0].2,
+                window[1].2
             );
         }
     }

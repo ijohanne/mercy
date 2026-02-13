@@ -21,7 +21,10 @@ pub fn router(state: AppState, ref_images: Arc<Vec<PreparedRef>>) -> Router {
         .route("/logout", post(logout_session))
         .route("/status", get(get_status))
         .route("/exchanges", get(get_exchanges))
-        .route("/exchanges/{index}/screenshot", get(get_exchange_screenshot))
+        .route(
+            "/exchanges/{index}/screenshot",
+            get(get_exchange_screenshot),
+        )
         .route("/screenshot", get(get_screenshot))
         .route("/goto", get(goto_coords))
         .route("/detect", get(detect_match))
@@ -95,9 +98,7 @@ async fn start_scan(
 
             Ok(Json(json!({"status": "started"})))
         }
-        ScannerPhase::Scanning | ScannerPhase::Preparing => {
-            Err(StatusCode::CONFLICT)
-        }
+        ScannerPhase::Scanning | ScannerPhase::Preparing => Err(StatusCode::CONFLICT),
     }
 }
 
@@ -182,12 +183,8 @@ async fn prepare_session(
 
             Ok(Json(json!({"status": "preparing"})))
         }
-        ScannerPhase::Ready | ScannerPhase::Paused => {
-            Ok(Json(json!({"status": "ready"})))
-        }
-        ScannerPhase::Preparing | ScannerPhase::Scanning => {
-            Err(StatusCode::CONFLICT)
-        }
+        ScannerPhase::Ready | ScannerPhase::Paused => Ok(Json(json!({"status": "ready"}))),
+        ScannerPhase::Preparing | ScannerPhase::Scanning => Err(StatusCode::CONFLICT),
     }
 }
 
@@ -262,13 +259,22 @@ async fn get_exchange_screenshot(
     check_auth(&headers, &state.config.auth_token)?;
 
     let exchange = state.exchanges.get(index).ok_or(StatusCode::NOT_FOUND)?;
-    let png = exchange.screenshot_png.clone().ok_or(StatusCode::NOT_FOUND)?;
-    let filename = format!("exchange_k{}_{}_{}.png", exchange.kingdom, exchange.x, exchange.y);
+    let png = exchange
+        .screenshot_png
+        .clone()
+        .ok_or(StatusCode::NOT_FOUND)?;
+    let filename = format!(
+        "exchange_k{}_{}_{}.png",
+        exchange.kingdom, exchange.x, exchange.y
+    );
 
     Ok((
         [
             (header::CONTENT_TYPE, "image/png".to_owned()),
-            (header::CONTENT_DISPOSITION, format!("inline; filename=\"{filename}\"")),
+            (
+                header::CONTENT_DISPOSITION,
+                format!("inline; filename=\"{filename}\""),
+            ),
         ],
         png,
     ))
@@ -281,16 +287,16 @@ async fn get_screenshot(
     let state = api.app.lock().await;
     check_auth(&headers, &state.config.auth_token)?;
 
-    let browser = state.browser.clone().ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+    let browser = state
+        .browser
+        .clone()
+        .ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
     drop(state); // Release lock before async screenshot
 
-    let png_bytes = browser
-        .take_screenshot()
-        .await
-        .map_err(|e| {
-            tracing::error!("screenshot failed: {e:#}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+    let png_bytes = browser.take_screenshot().await.map_err(|e| {
+        tracing::error!("screenshot failed: {e:#}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
 
     // Store for detect to reuse
     api.app.lock().await.last_screenshot = Some(png_bytes.clone());
@@ -298,7 +304,10 @@ async fn get_screenshot(
     Ok((
         [
             (header::CONTENT_TYPE, "image/png".to_owned()),
-            (header::CONTENT_DISPOSITION, "inline; filename=\"screenshot.png\"".to_owned()),
+            (
+                header::CONTENT_DISPOSITION,
+                "inline; filename=\"screenshot.png\"".to_owned(),
+            ),
         ],
         png_bytes,
     ))
@@ -319,7 +328,10 @@ async fn goto_coords(
     let state = api.app.lock().await;
     check_auth(&headers, &state.config.auth_token)?;
 
-    let browser = state.browser.clone().ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+    let browser = state
+        .browser
+        .clone()
+        .ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
     drop(state);
 
     browser
@@ -330,13 +342,10 @@ async fn goto_coords(
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 
-    let png_bytes = browser
-        .take_screenshot()
-        .await
-        .map_err(|e| {
-            tracing::error!("screenshot failed: {e:#}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+    let png_bytes = browser.take_screenshot().await.map_err(|e| {
+        tracing::error!("screenshot failed: {e:#}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
 
     // Store for detect to reuse
     api.app.lock().await.last_screenshot = Some(png_bytes.clone());
@@ -345,7 +354,10 @@ async fn goto_coords(
     Ok((
         [
             (header::CONTENT_TYPE, "image/png".to_owned()),
-            (header::CONTENT_DISPOSITION, format!("inline; filename=\"{filename}\"")),
+            (
+                header::CONTENT_DISPOSITION,
+                format!("inline; filename=\"{filename}\""),
+            ),
         ],
         png_bytes,
     ))

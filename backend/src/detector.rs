@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use image::{DynamicImage, GrayImage, RgbImage};
 use image::imageops::FilterType;
+use image::{DynamicImage, GrayImage, RgbImage};
 use imageproc::gradients::sobel_gradients;
-use imageproc::template_matching::{match_template, MatchTemplateMethod};
+use imageproc::template_matching::{MatchTemplateMethod, match_template};
 
 /// A detected match position in the screenshot (pixel coordinates, at original scale).
 #[derive(Debug, Clone)]
@@ -123,24 +123,33 @@ pub fn find_matches(
 
     for prepared in ref_images {
         // Skip if reference is larger than screenshot
-        if prepared.width >= screenshot_rgb.width()
-            || prepared.height >= screenshot_rgb.height()
-        {
+        if prepared.width >= screenshot_rgb.width() || prepared.height >= screenshot_rgb.height() {
             tracing::warn!(
                 "reference image {}x{} is too large for screenshot {}x{}, skipping",
-                prepared.width, prepared.height,
-                screenshot_rgb.width(), screenshot_rgb.height()
+                prepared.width,
+                prepared.height,
+                screenshot_rgb.width(),
+                screenshot_rgb.height()
             );
             continue;
         }
 
         tracing::debug!(
             "matching {}x{} template against {}x{} screenshot (RGBE 4-channel)",
-            prepared.width, prepared.height,
-            screenshot_rgb.width(), screenshot_rgb.height()
+            prepared.width,
+            prepared.height,
+            screenshot_rgb.width(),
+            screenshot_rgb.height()
         );
 
-        let matches = find_template_matches_rgbe(&screenshot_channels, &screenshot_edge, &prepared.channels, &prepared.edge, prepared.width, prepared.height)?;
+        let matches = find_template_matches_rgbe(
+            &screenshot_channels,
+            &screenshot_edge,
+            &prepared.channels,
+            &prepared.edge,
+            prepared.width,
+            prepared.height,
+        )?;
 
         // Scale match coordinates back to original size and offset to full screenshot
         let scaled: Vec<TemplateMatch> = matches
@@ -199,14 +208,19 @@ fn find_template_matches_rgbe(
     if candidates.is_empty() {
         tracing::info!(
             "template {}x{}: early-exit after R (best={:.4}, 0 candidates)",
-            template_w, template_h, best_score
+            template_w,
+            template_h,
+            best_score
         );
         return Ok(Vec::new());
     }
 
     tracing::info!(
         "template {}x{}: R pass: {} candidates (best={:.4})",
-        template_w, template_h, candidates.len(), best_score
+        template_w,
+        template_h,
+        candidates.len(),
+        best_score
     );
 
     // Channels 1-3: G, B, Edge — filter candidates, early-exit if none survive
@@ -247,14 +261,21 @@ fn find_template_matches_rgbe(
         if candidates.is_empty() {
             tracing::info!(
                 "template {}x{}: early-exit after {} (best={:.4}, 0 candidates)",
-                template_w, template_h, ch_name, best_score
+                template_w,
+                template_h,
+                ch_name,
+                best_score
             );
             return Ok(Vec::new());
         }
 
         tracing::info!(
             "template {}x{}: {} pass: {} candidates (best={:.4})",
-            template_w, template_h, ch_name, candidates.len(), best_score
+            template_w,
+            template_h,
+            ch_name,
+            candidates.len(),
+            best_score
         );
     }
 
@@ -269,10 +290,18 @@ fn find_template_matches_rgbe(
 
     tracing::info!(
         "template {}x{}: best_score={:.4}, {} raw matches above {:.2} (RGBE 4-channel)",
-        template_w, template_h, best_score, matches.len(), MATCH_THRESHOLD
+        template_w,
+        template_h,
+        best_score,
+        matches.len(),
+        MATCH_THRESHOLD
     );
 
-    matches.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    matches.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     Ok(matches)
 }
@@ -303,9 +332,7 @@ pub fn find_best_match(
     let mut best: Option<TemplateMatch> = None;
 
     for prepared in ref_images {
-        if prepared.width >= screenshot_rgb.width()
-            || prepared.height >= screenshot_rgb.height()
-        {
+        if prepared.width >= screenshot_rgb.width() || prepared.height >= screenshot_rgb.height() {
             continue;
         }
 
@@ -389,7 +416,11 @@ pub fn find_best_match(
 
 fn deduplicate_matches(matches: &mut [TemplateMatch], min_distance: u32) -> Vec<TemplateMatch> {
     // Sort by score descending so we keep the best matches
-    matches.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    matches.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     let mut result = Vec::new();
 
@@ -416,7 +447,9 @@ fn deduplicate_matches(matches: &mut [TemplateMatch], min_distance: u32) -> Vec<
 /// 2. Relative to CWD (e.g. `./assets/...`)
 /// 3. Relative to the binary's `../share/mercy/` (Nix install layout)
 pub fn load_reference_images(search_target: &str) -> Result<Vec<Arc<DynamicImage>>> {
-    let env_assets = std::env::var("MERCY_ASSETS_DIR").ok().map(std::path::PathBuf::from);
+    let env_assets = std::env::var("MERCY_ASSETS_DIR")
+        .ok()
+        .map(std::path::PathBuf::from);
 
     let bin_share = std::env::current_exe()
         .ok()
