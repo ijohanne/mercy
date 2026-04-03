@@ -16,8 +16,17 @@
     };
   };
 
-  outputs = { self, nixpkgs, flake-utils, rust-overlay, bun2nix, git-hooks }:
-    flake-utils.lib.eachDefaultSystem (system:
+  outputs =
+    {
+      self,
+      nixpkgs,
+      flake-utils,
+      rust-overlay,
+      bun2nix,
+      git-hooks,
+    }:
+    flake-utils.lib.eachDefaultSystem (
+      system:
       let
         overlays = [ rust-overlay.overlays.default ];
         pkgs = import nixpkgs { inherit system overlays; };
@@ -48,12 +57,16 @@
             typos = {
               enable = true;
               excludes = [
+                "^\\.callis\\.lock$"
+                "^\\.(codex|claude|opencode)/.*$"
                 "^frontend/bun\\.nix$"
                 "^frontend/bun\\.lock$"
                 "^docs/.*$"
               ];
               settings = {
                 ignored-words = [
+                  "ba"
+                  "callis"
                   "ser"
                   "idents"
                 ];
@@ -110,7 +123,8 @@
             };
           };
         };
-      in {
+      in
+      {
         packages = {
           mercy-backend = rustPlatform.buildRustPackage {
             pname = "mercy";
@@ -171,21 +185,25 @@
 
         devShells.default = pkgs.mkShell {
           inherit (pre-commit-check) shellHook;
-          buildInputs = with pkgs; [
-            rustToolchain
-            pkg-config
-            openssl
-            bun
-            just
-            (python3.withPackages (ps: [ ps.pillow ]))
-            (writeShellScriptBin "dev" "just dev")
-            (writeShellScriptBin "stop" "just stop")
-          ] ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [
-            pkgs.chromium
-          ];
+          buildInputs =
+            with pkgs;
+            [
+              rustToolchain
+              pkg-config
+              openssl
+              bun
+              just
+              (python3.withPackages (ps: [ ps.pillow ]))
+              (writeShellScriptBin "dev" "just dev")
+              (writeShellScriptBin "stop" "just stop")
+            ]
+            ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [
+              pkgs.chromium
+            ];
         };
       }
-    ) // {
+    )
+    // {
       nixosModules.default = import ./nix/module.nix;
     };
 }

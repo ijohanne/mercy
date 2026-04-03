@@ -6,7 +6,9 @@ frontend/next-env.d.ts
 .env
 .DS_Store
 .direnv/
+.callis.lock
 debug_*.png
 screenshot.png
 plans/
 issues/
+.pre-commit-config.yaml
